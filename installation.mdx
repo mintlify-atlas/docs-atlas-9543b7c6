@@ -1,0 +1,174 @@
+---
+title: "Installing N2AB Client — Browser and Desktop"
+sidebarTitle: "Installation"
+description: "Set up N2AB Client as a browser-based game mod or a standalone Electron desktop application. Covers prerequisites and build-from-source steps."
+---
+
+N2AB Client is available in three forms: a hosted browser experience that requires no installation at all, a standalone Electron desktop application for Windows, macOS, and Linux, and an Android build powered by Capacitor. This page walks through each option, including how to build and package the desktop app from source when you need full control over the bundle.
+
+## Prerequisites
+
+You only need these tools if you intend to build from source or run the Electron app locally. A plain browser visit to the hosted game has no prerequisites.
+
+| Dependency | Minimum version | Required for          |
+|------------|-----------------|-----------------------|
+| Node.js    | 18 LTS or later | All local builds      |
+| Git        | Any recent      | Cloning the repo      |
+| Android Studio + SDK | Latest stable | Android build only |
+
+## Option 1 — Browser (no install)
+
+Visit **[https://polytrack.skyhost.fun](https://polytrack.skyhost.fun)** in any modern browser. N2AB Client loads automatically with the game — there is nothing to download or configure. This is the recommended starting point for anyone who just wants to use the overlays.
+
+## Option 2 — Electron desktop app
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/xpixelcoderx/polytrack.git
+    cd polytrack
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    npm install
+    ```
+    This installs Electron, Webpack, Capacitor, TypeScript, and all other build-time dependencies declared in `package.json`.
+  </Step>
+
+  <Step title="Start the app in development mode">
+    ```bash
+    npm run electron
+    ```
+    The `preelectron` hook runs Webpack first (`TARGET=electron`) to produce the `dist/` directory, then Electron loads `dist/index.html`. The app opens full-screen with the N2AB splash screen while it checks for updates, then launches directly into the game.
+
+    <Note>
+      On Linux, Electron defaults to the X11 backend unless `N2AB_WAYLAND=1` is
+      set. See the [Wayland note](#wayland-linux) below.
+    </Note>
+  </Step>
+
+  <Step title="Build a distributable package">
+    ```bash
+    npm run build-electron
+    ```
+    The `prebuild-electron` hook compiles the game with Webpack (`TARGET=electron`), then `electron/build.js` uses `@electron/packager` to produce a self-contained distributable in the project root.
+  </Step>
+</Steps>
+
+## Option 3 — Android (Capacitor)
+
+The Android build compiles the game with `TARGET=android`, syncs assets into the Capacitor Android project, then launches the app on a connected device or emulator:
+
+```bash
+npm run android
+```
+
+For Google Play distribution use the `android-play` target instead, which sets `TARGET=android-play`:
+
+```bash
+npm run android-play
+```
+
+Both targets require Android Studio with a configured SDK and either a connected device or a running emulator.
+
+## Build targets and environment variables
+
+The Webpack build accepts a `TARGET` environment variable that controls which platform shims and API endpoints are compiled in. `API_URL` sets the backend base URL (used for development servers):
+
+<CodeGroup>
+```bash Browser / Kodub hosted
+cross-env TARGET=kodub API_URL=http://localhost:8000/ webpack --mode=production
+```
+
+```bash Electron
+cross-env TARGET=electron API_URL=http://localhost:8000/ webpack --mode=development
+```
+
+```bash Android
+cross-env TARGET=android API_URL=http://localhost:8000/ webpack --mode=development
+```
+</CodeGroup>
+
+The `npm run dev` script uses `TARGET=kodub` and starts a Webpack dev server with hot reloading, which is useful for iterating on the main game code.
+
+## Auto-updater flags
+
+The Electron app checks for updates on every launch by fetching a manifest from the update server. Several environment variables and command-line flags let you control this behaviour:
+
+| Flag / Variable              | Effect                                                          |
+|------------------------------|-----------------------------------------------------------------|
+| `--no-update` (argv)         | Skip the update check entirely and load the game immediately    |
+| `N2AB_NO_UPDATE=1` (env)     | Same as `--no-update`, set via environment variable             |
+| `--manifest=<url>` (argv)    | Override the manifest URL fetched for update metadata           |
+| `N2AB_MANIFEST=<url>` (env)  | Same as `--manifest=`, set via environment variable             |
+
+To launch without any update check:
+
+<CodeGroup>
+```bash Command-line flag
+electron ./dist --no-update
+```
+
+```bash Environment variable
+N2AB_NO_UPDATE=1 electron ./dist
+```
+</CodeGroup>
+
+To point the updater at a custom manifest (useful for staging or self-hosted builds):
+
+<CodeGroup>
+```bash Command-line flag
+electron ./dist --manifest=https://your-server.example.com/n2ab.json
+```
+
+```bash Environment variable
+N2AB_MANIFEST=https://your-server.example.com/n2ab.json electron ./dist
+```
+</CodeGroup>
+
+<Warning>
+  When `--no-update` or `N2AB_NO_UPDATE=1` is active, the splash screen shows
+  "Update check skipped" and the build number is labelled **DEV**. Do not
+  distribute binaries built with this flag set.
+</Warning>
+
+## Wayland (Linux)
+
+By default, the Electron main process forces the X11 backend on Linux to avoid rendering issues under some Wayland compositors:
+
+```js electron/main.js
+if (process.platform === "linux" && process.env.N2AB_WAYLAND !== "1") {
+  app.commandLine.appendSwitch("ozone-platform-hint", "x11");
+}
+```
+
+If you are running a native Wayland session and want hardware-accelerated rendering without XWayland, set the environment variable before launching:
+
+```bash
+N2AB_WAYLAND=1 npm run electron
+```
+
+<Tip>
+  Native Wayland mode requires a compositor that supports the `xdg-shell`
+  protocol (KDE Plasma 6, GNOME 45+, Sway, and most other modern compositors).
+  If the window fails to appear, unset `N2AB_WAYLAND` and fall back to the
+  default X11 mode.
+</Tip>
+
+## Build the N2AB Client bundle
+
+Whenever you add or change a module in `tools/modules.js`, regenerate the bundle before launching:
+
+```bash
+node tools/build-n2ab-client.js
+```
+
+Pass `--check` to verify the bundle without writing anything — suitable for CI:
+
+```bash
+node tools/build-n2ab-client.js --check
+```
+
+The tool validates that the checksum rotation is exactly 348, no upstream brand tokens survive, and the output parses as valid JavaScript. Any failure exits with a non-zero code and a descriptive error message.

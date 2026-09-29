@@ -1,0 +1,197 @@
+---
+title: "Understanding the N2AB Client Bundle Internals"
+sidebarTitle: "Bundle Internals"
+description: "How the N2AB Client obfuscated bundle encodes strings, performs rotation-based checksumming, and how the build tool safely patches it without breaking the runtime."
+---
+
+The N2AB Client is distributed as a pre-built, obfuscated JavaScript bundle (`n2ab_client.bundle.js`). There are no upstream TypeScript or ES module sources in this repository — the bundle is a closed artifact. All customisations, from rebranding to CSS injection to extra module registration, are applied by `tools/build-n2ab-client.js` as a repeatable transform against the binary artifact. Understanding how the bundle stores and loads strings is essential for anyone modifying the build tool or auditing why certain entries must never be changed.
+
+## Bundle overview
+
+The bundle is a single self-contained JavaScript file. It is loaded directly in a `BrowserWindow` (Electron) or in a browser tab. Alongside it sit two files that belong to the physics engine and one decoder library:
+
+| File | Purpose |
+|---|---|
+| `n2ab_client.bundle.js` | Main game and UI — the file the build tool patches |
+| `n2ab_client.wasm.js` | JavaScript glue for the physics WebAssembly module |
+| `polytrack_physics.wasm` | Compiled Bullet physics engine (Emscripten output) |
+| `lib/draco/` | Draco geometry decoder used for compressed 3-D assets |
+
+<Warning>
+  Never hand-edit `n2ab_client.bundle.js`. Minified identifiers are meaningless out of context, and any manual change that touches a checksum-pinned string entry will cause the runtime to hang at startup. Always use `node tools/build-n2ab-client.js`.
+</Warning>
+
+## String array mechanics
+
+All string literals in the bundle are stored in a single array inside one function:
+
+```js
+function _0x2b4a(){ var _0x5d167e = [ /* encoded entries */ ] }
+```
+
+This is the anchor the build tool searches for:
+
+```js
+const anchor = "function _0x2b4a(){var _0x5d167e=[";
+```
+
+Each element of the array is encoded with a custom base64-ish alphabet. The codec is reproduced in `tools/obfuscated-string-codec.js` so the build tool can round-trip any entry without touching the C runtime.
+
+### Custom alphabet
+
+The codec uses the following 65-character alphabet (standard base64 plus `=` as a pad character, but in a different character class order than RFC 4648):
+
+```
+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/=
+```
+
+Encoding converts the input string to a percent-encoded Latin-1 byte sequence first, then groups bytes in triplets and maps each 6-bit sextet to the alphabet. Decoding is the exact mirror. Unicode strings (emoji, CJK, accented characters) survive the round-trip because the percent-encoding step handles multi-byte code points.
+
+### Rotation-based checksumming
+
+At startup the bundle does not use the string array directly. It first **rotates** the array — repeatedly shifting the first element off the front and appending it to the back — until a checksum computed over nine specific entries equals `0xe681e`. For the current build this takes exactly **348 rotations**.
+
+The checksum formula (using `BASE = 0x14d` as the index bias):
+
+```js
+const sum =
+  -parseInt(at(0x60b)) / 1 +
+  (-parseInt(at(0x4ae)) / 2) * (-parseInt(at(0x1176)) / 3) +
+  -parseInt(at(0xcd7)) / 4 +
+   parseInt(at(0x53b)) / 5 +
+   parseInt(at(0x8a2)) / 6 +
+  (-parseInt(at(0x1d4)) / 7) * (-parseInt(at(0x5d0)) / 8) +
+   parseInt(at(0x5f7)) / 9;
+// succeeds when: sum === 0xe681e (348 rotations)
+```
+
+Where `at(hex)` decodes element `hex - 0x14d` of the working array.
+
+## Why rotation matters for patching
+
+After 348 rotations, each encoded entry ends up at a different index than it occupies in the source file. The critical insight is that **indices are resolved after rotation**, so rewriting a value in place (in the source file, before rotation) is safe: changing the text of entry `i` does not change where that entry lands post-rotation, and it does not affect any other entry's post-rotation position.
+
+The build tool exploits this:
+
+1. It reads the array as it appears in the source file.
+2. It skips the nine checksum-pinned entries.
+3. It decodes, transforms, and re-encodes every other entry.
+4. It splices the new array back into the source at the same byte offsets.
+5. It then calls `rotateToRuntime()` on the patched array to confirm rotation still terminates at exactly 348 steps.
+
+## The codec (`obfuscated-string-codec.js`)
+
+```js
+// Decode an encoded bundle string to a plain JavaScript string
+function decode(s) { ... }
+
+// Encode a plain JavaScript string back to the bundle's encoding
+function encode(str) { ... }
+
+module.exports = { encode, decode };
+```
+
+The module can be run directly as a self-test:
+
+```bash
+node tools/obfuscated-string-codec.js
+# prints: round-trip OK
+```
+
+The test corpus includes ASCII, multi-byte Unicode, and strings with percent-encoded characters to confirm the round-trip is lossless.
+
+## How `findStringArray()` locates the array
+
+The function scans the source for the exact anchor string, then bracket-walks from the opening `[` to find the matching `]`, handling nested brackets:
+
+```js
+function findStringArray(src) {
+  const anchor = "function _0x2b4a(){var _0x5d167e=[";
+  const at = src.indexOf(anchor);
+  if (at < 0) throw new Error("string array not found - bundle layout changed");
+  const open = src.indexOf("[", at);
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "[") depth++;
+    else if (src[i] === "]" && --depth === 0) {
+      return { open, end: i, arr: JSON.parse(src.slice(open, i + 1).replace(/'/g, '"')) };
+    }
+  }
+  throw new Error("unterminated string array");
+}
+```
+
+The returned object contains the byte offsets `open` and `end` (so the array can be spliced back in place) and the parsed JavaScript array `arr`.
+
+## How `rebrandText()` works
+
+Once an entry is decoded to a plain string, `rebrandText()` applies a chain of `.replace()` calls. Before any substitution runs, `polytraqqq.com` is swapped out for a null-byte sentinel (`\u0000KEEPHOST\u0000`) so that no downstream rule can accidentally rename the live-update and logo hostname. The sentinel is restored at the end.
+
+The full ordered replacement chain covers display names (`PolyTraqqq` → `N2AB Client`), lowercase identifiers (`polytraqqq` → `n2abclient`), internal prefixes (`__polyfly`, `__ptq`, `__pf`), CSS custom property prefixes (`--ptq-`, `--pf-`), Tailwind-style utility classes (`text-pf-`, `bg-pf-`, `border-pf-`), and camelCase / `@keyframes` identifiers (`ptq[A-Z]` → `n2ab[A-Z]`, `ptq-` → `n2ab-`).
+
+After all string-table entries are processed, `rebrandText()` is applied a second time to the raw code regions outside the array (variable declarations, comments, and any string literals that are not in the table).
+
+## Checksum enforcement
+
+<Warning>
+  If any of the nine checksum-pinned entries are modified — even by one character — the rotation loop in the runtime will never find a matching checksum and the game will hang indefinitely on startup. The build tool prevents this by skipping those indices unconditionally.
+</Warning>
+
+The nine pinned pre-rotation indices (raw hex, each minus `0x14d` for the zero-based offset):
+
+```
+0x60b  0x4ae  0x1176  0xcd7  0x53b
+0x8a2  0x1d4  0x5d0   0x5f7
+```
+
+These are stored in `CHECKSUM_INDICES` in the build script:
+
+```js
+const CHECKSUM_INDICES = [0x60b, 0x4ae, 0x1176, 0xcd7, 0x53b, 0x8a2, 0x1d4, 0x5d0, 0x5f7]
+  .map(h => h - BASE);
+```
+
+Every call to the array-rewriting loop begins with:
+
+```js
+if (CHECKSUM_INDICES.includes(i)) return enc; // never touch checksum entries
+```
+
+## Safety checks the build performs
+
+After patching, the build tool runs five verification steps before writing anything to disk:
+
+1. **Array re-parse** — `findStringArray()` is called on the patched source to confirm the array is still syntactically valid and locatable.
+2. **Rotation check** — `rotateToRuntime()` must return `rotations === 348`. Any other value throws immediately.
+3. **Leftover brand scan** — every entry in the patched array is decoded and tested against `/polytraqqq(?!\.com)|polyfly|\bptq|__pf[A-Z]|\bpf-/i`. Any match is reported and causes a throw.
+4. **JavaScript syntax validation** — the full patched source is compiled with `new vm.Script(src, { filename: "n2ab_client.bundle.js" })`. A syntax error throws before the file is touched.
+5. **Round-trip verification** — every rewritten entry is decoded immediately after encoding to confirm `decode(encode(s)) === s` for all touched values.
+
+Only after all five checks pass does the script call `fs.writeFileSync`.
+
+## Adding a module
+
+New features are registered by appending to `tools/modules.js` and re-running the build. The `__api` object is injected by the bundle:
+
+```js
+__api.registerFeature("myModule", {
+  label: "My Module",
+  description: "Shown under the name in the panel.",
+  category: "HUD", // Movement | HUD | Network | Render
+  settings: {
+    amount: { type: "range", label: "Amount", min: 0, max: 100, step: 5, default: 50 },
+    enabled: { type: "bool", label: "Enabled", default: true },
+  },
+  onState(state) {
+    const s = state.myModule; // { active, amount, enabled }
+    if (!s.active) return;
+    // your code here
+  },
+});
+```
+
+Settings types are `range`, `bool`, and `text`. Module state is persisted under the `N2AB_SETTINGS` localStorage key. Add `transient: true` to a setting to opt it out of persistence.
+
+<Tip>
+  After editing `modules.js`, run `node tools/build-n2ab-client.js --check` first. If the check passes, re-run without `--check` to write the bundle. This ensures you never write a bundle that would fail the rotation or brand checks.
+</Tip>

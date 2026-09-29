@@ -1,0 +1,131 @@
+---
+title: "Movement and Network Modules in N2AB Client"
+sidebarTitle: "Movement & Network"
+description: "Overview of the Movement and Network module categories in N2AB Client — currently available as extension points for custom module authors."
+---
+
+N2AB Client's module registry recognises four categories: HUD, Render, Movement, and Network. The current release ships seven built-in modules that all fall into the HUD or Render categories. **Movement and Network contain no built-in modules** — they exist as named extension points so that custom module authors can slot their work into a semantically correct section of the N2AB panel alongside the built-in overlays.
+
+This page explains the intended purpose of each category and shows how to register a custom module under either one.
+
+## What each category is for
+
+**Movement** modules are intended to react to or report on the vehicle's physics state. The client's physics hook exposes a real-time snapshot at `g.__n2abSnap` that contains the linear velocity vector (`linVel`) and any other fields populated by the hook. A Movement module might visualise suspension travel, flag when the car is airborne, or compute cornering G-forces — all read-only interactions with the snapshot.
+
+**Network** modules would interact with race or lobby data — player positions in a multiplayer session, ghost comparison data, or timing packets from the server. The category name signals to the panel that the module's concerns are networked rather than purely local, which helps users understand what to expect (and what permissions or data access the module requires).
+
+<Note>
+  Neither category grants any special API access beyond what is already available to HUD and Render modules. The category field is informational — it controls panel grouping and the section label, nothing more.
+</Note>
+
+## Registering a Movement module
+
+Custom modules are registered with `__api.registerFeature` using the same contract as the built-in modules. Set `category: "Movement"` to place the module in the Movement section of the panel.
+
+The example below registers a simple airtime detector that reads `g.__n2abSnap.linVel` to estimate whether the car is in the air (upward velocity above a threshold with near-zero lateral grip):
+
+```javascript
+__api.registerFeature("airtimeAlert", {
+  label: "Airtime Alert",
+  description: "Flashes an overlay when the car leaves the ground.",
+  category: "Movement",
+  settings: {
+    threshold: {
+      type: "range",
+      label: "Vertical speed threshold (km/h)",
+      min: 5,
+      max: 50,
+      step: 5,
+      default: 15,
+    },
+  },
+  onState: function (state) {
+    var s = state.airtimeAlert || {};
+    if (!s.active) {
+      // clean up overlay and animation loop
+      n2abStop("airtime");
+      n2abRemove("n2ab-airtime");
+      return;
+    }
+
+    var el = n2abOverlay(
+      "n2ab-airtime",
+      "top:50%;left:50%;transform:translate(-50%,-50%);font-size:18px;display:none;"
+    );
+    var thresh = (Number(s.threshold) || 15) / 3.6; // convert km/h → m/s
+
+    n2abLoop("airtime", function () {
+      var snap = g.__n2abSnap;
+      // linVel components: x (lateral), y (vertical), z (longitudinal)
+      var vy = snap && snap.linVel ? snap.linVel.y : 0;
+      if (vy > thresh) {
+        el.style.display = "block";
+        el.textContent = "AIRTIME  " + (vy * 3.6).toFixed(1) + " km/h ↑";
+      } else {
+        el.style.display = "none";
+      }
+    });
+  },
+});
+```
+
+<Note>
+  `n2abOverlay`, `n2abRemove`, `n2abLoop`, and `n2abStop` are utility helpers defined at the top of `tools/modules.js`. They are available in the same scope as your registered module because the build pipeline injects all module files into one bundle.
+</Note>
+
+## Registering a Network module
+
+A Network module follows the identical registration pattern; only the `category` field changes. The example below sketches a module that would display the current multiplayer ghost count — filling in the actual network globals once they are documented:
+
+```javascript
+__api.registerFeature("ghostCounter", {
+  label: "Ghost Counter",
+  description: "Shows how many ghost cars are loaded in the current session.",
+  category: "Network",
+  settings: {
+    corner: {
+      type: "range",
+      label: "Corner (1-4)",
+      min: 1,
+      max: 4,
+      step: 1,
+      default: 2,
+    },
+  },
+  onState: function (state) {
+    var s = state.ghostCounter || {};
+    if (!s.active) {
+      n2abStop("ghosts");
+      n2abRemove("n2ab-ghosts");
+      return;
+    }
+
+    var spots = {
+      1: "top:14px;left:14px;",
+      2: "top:14px;right:14px;",
+      3: "bottom:14px;left:14px;",
+      4: "bottom:14px;right:14px;",
+    };
+    var el = n2abOverlay("n2ab-ghosts", spots[s.corner] || spots[2]);
+
+    n2abLoop("ghosts", function () {
+      // g.__n2abGhosts would be populated by a future network hook
+      var ghosts = g.__n2abGhosts || [];
+      el.textContent = "GHOSTS  " + String(ghosts.length).padStart(3, " ");
+    });
+  },
+});
+```
+
+## Key differences between Movement and Network modules
+
+| | Movement | Network |
+|---|---|---|
+| **Primary data source** | `g.__n2abSnap` (physics snapshot — position, velocity, orientation) | Networked race / lobby globals (ghost data, player lists, timing packets) |
+| **Update frequency** | Every animation frame — physics runs at the browser's render rate | Depends on server tick rate; may need debouncing |
+| **Typical use cases** | Speed readouts, G-force display, jump detection, suspension telemetry | Ghost management, multiplayer lap deltas, connection quality indicators |
+| **Offline availability** | Always available — physics runs in time trial and offline modes | Only meaningful in connected sessions |
+
+## Full module registration contract
+
+For the complete `__api.registerFeature` signature — including all setting types, `mode` values, `transient` flag, `onToggle` callback, and persistence behaviour — see the [Adding Modules](/customization/adding-modules) guide.

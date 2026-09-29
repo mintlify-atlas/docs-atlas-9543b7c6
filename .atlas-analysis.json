@@ -1,0 +1,97 @@
+{
+  "projectType": "saas",
+  "projectName": "Polytrack Skyhost",
+  "projectDescription": "N2AB Client is a browser/Electron-based mod client for the PolyTrack racing game that injects HUD overlays, performance tools, and visual enhancements directly into the game via a feature registry.",
+  "theme": "luma",
+  "primaryColor": "#6d8bff",
+  "lightColor": "#79c0e8",
+  "darkColor": "#dcb4dc",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Built-in Modules",
+            "pages": [
+              "modules/overview",
+              "modules/hud",
+              "modules/render",
+              "modules/movement"
+            ]
+          },
+          {
+            "group": "Customization",
+            "pages": [
+              "customization/adding-modules",
+              "customization/settings-api",
+              "customization/ui-polish"
+            ]
+          },
+          {
+            "group": "Build & Deployment",
+            "pages": [
+              "build/build-tool",
+              "build/electron",
+              "build/bundle-internals"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Feature Registry",
+            "pages": [
+              "api/register-feature",
+              "api/state-and-settings",
+              "api/overlay-helpers"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Feature registry API (__api.registerFeature) for injecting custom modules",
+    "Performance overlay showing FPS, frame time, and 1% lows",
+    "Speed graph with rolling velocity trace",
+    "Checkpoint splits tracker with delta against best run",
+    "Input display (WASD/arrow key overlay) for recordings",
+    "Clean screen / cinematic mode that hides game HUD",
+    "Session stats (top speed, average speed, total distance)",
+    "Panel theme customizer with hue and surface darkness controls",
+    "Electron desktop app with auto-updater (N2AB updater)",
+    "Idempotent build tool that rebrands and patches the obfuscated bundle",
+    "Draco + WebAssembly physics engine (Bullet physics via Emscripten)",
+    "LocalStorage-based settings persistence under N2AB_SETTINGS"
+  ],
+  "publicApiSurface": [
+    "__api.registerFeature(name, descriptor) — registers a new module in the panel",
+    "descriptor.settings — declares range, bool, text setting fields",
+    "descriptor.onState(state) — called on every state change with active flag + setting values",
+    "descriptor.onToggle(active, state) — called specifically when the module is toggled",
+    "descriptor.category — one of: Movement | HUD | Network | Render",
+    "descriptor.mode — one of: toggle | hold | momentary",
+    "descriptor.transient — opt out of localStorage persistence",
+    "n2abOverlay(id, css) — create or retrieve a fixed overlay element",
+    "n2abRemove(id) — remove an overlay by id",
+    "n2abLoop(name, fn) — start a rAF loop keyed by name",
+    "n2abStop(name) — cancel a named rAF loop",
+    "n2abSpeed() — returns current car speed in m/s from __n2abSnap",
+    "window.n2ab(stateObj) — splash-screen update callback (states: local, info, downloading, verifying, restarting, uptodate, skipped, error)",
+    "electron IPC: quit, is-fullscreen, set-fullscreen, get-argv, log-message, fullscreen-change",
+    "node tools/build-n2ab-client.js — apply all transforms and write n2ab_client.bundle.js",
+    "node tools/build-n2ab-client.js --check — verify transforms without writing",
+    "obfuscated-string-codec.js encode/decode — custom base64-alphabet codec for the bundle string table"
+  ]
+}

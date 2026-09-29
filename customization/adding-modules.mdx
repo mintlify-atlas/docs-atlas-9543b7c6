@@ -1,0 +1,297 @@
+---
+title: "Adding Custom Modules to the N2AB Client Panel"
+sidebarTitle: "Adding Modules"
+description: "Extend N2AB Client with custom modules by appending a registerFeature call to tools/modules.js and running the build tool to patch the bundle."
+---
+
+The N2AB Client panel is driven by a feature registry that any developer can extend. Because the client ships as a pre-built, obfuscated bundle, you do not edit the bundle by hand — instead you append your module code to `tools/modules.js` and let the build tool inject it at the correct location automatically. This page walks through every part of the API and closes with a fully worked example.
+
+## Workflow overview
+
+<Steps>
+  <Step title="Append your module to tools/modules.js">
+    Open `tools/modules.js` and add a `__api.registerFeature(...)` call at the bottom of the file. The `__api` object is provided by the client's feature registry and is in scope for everything in that file.
+  </Step>
+  <Step title="Run the build tool">
+    From the repo root, run:
+    ```bash
+    node tools/build-n2ab-client.js
+    ```
+    The build wraps `modules.js` in an IIFE, splices it into the bundle right after the built-in modules register, and writes the patched file as `n2ab_client.bundle.js`. The build is idempotent — running it twice produces the same output.
+  </Step>
+  <Step title="Verify without writing">
+    To confirm the injection is valid without touching the bundle, add `--check`:
+    ```bash
+    node tools/build-n2ab-client.js --check
+    ```
+    A clean run prints `check passed (nothing written)`. The tool also validates the rotation checksum (must stay at 348), confirms no brand leftovers survived, and syntax-checks the resulting JavaScript — so any error is caught before the bundle is touched.
+  </Step>
+</Steps>
+
+<Note>
+  The build enforces two hard constraints on the obfuscated string table: the nine checksum entries pinned in `CHECKSUM_INDICES` must stay byte-identical, and the rotation count must remain exactly 348. These are checked automatically — you never need to think about them when writing a module.
+</Note>
+
+---
+
+## The registerFeature signature
+
+Every module is registered with a single call. The full descriptor shape, mirroring the pattern used by every built-in module in `modules.js`, is:
+
+```javascript
+__api.registerFeature("myModule", {
+  label: "My Module",
+  description: "Shown under the name in the panel.",
+  category: "HUD",   // Movement | HUD | Network | Render
+
+  // Optional behavioural flags
+  mode: "toggle",    // "toggle" | "hold" | "momentary"
+  toggleable: true,  // whether the user can switch it on/off (default true)
+  transient: true,   // true = never written to localStorage
+
+  settings: {
+    amount: { type: "range", label: "Amount", min: 0, max: 100, step: 5, default: 50 },
+    enabled: { type: "bool", label: "Enabled", default: true },
+  },
+
+  onState(state) {
+    const s = state.myModule;   // { active, amount, enabled }
+    if (!s.active) return;
+    // your logic here
+  },
+
+  onToggle(active, state) {
+    // called only when the active flag changes
+  },
+});
+```
+
+---
+
+## Descriptor fields
+
+### label, description, category
+
+<ParamField path="label" type="string" required>
+  The human-readable name displayed as the row title in the panel.
+</ParamField>
+
+<ParamField path="description" type="string">
+  A short sentence rendered beneath the label in the panel row.
+</ParamField>
+
+<ParamField path="category" type="string" required>
+  Groups the module under one of the four built-in headings: `Movement`, `HUD`, `Network`, or `Render`.
+</ParamField>
+
+### mode
+
+<ParamField path="mode" type="string" default="toggle">
+  Controls how the active state behaves when the user interacts with the button:
+
+  - `"toggle"` — click once to activate, click again to deactivate. Default.
+  - `"hold"` — active only while the button is held down.
+  - `"momentary"` — fires once on press, does not latch.
+</ParamField>
+
+### toggleable
+
+<ParamField path="toggleable" type="boolean" default="true">
+  When `false`, the module row is displayed in the panel but the user cannot toggle it. Useful for purely settings-driven modules (like `theme`) where the active state is always meaningful.
+</ParamField>
+
+### transient
+
+<ParamField path="transient" type="boolean" default="false">
+  When `true`, the module's state is never written to `localStorage`. The module starts fresh on every page load. Useful for overlays that should not persist across sessions.
+</ParamField>
+
+---
+
+## The state object
+
+Every call to `onState` receives the full registry state object. Your module's slice is always at `state[name]` and has this shape:
+
+```javascript
+{
+  active: true,        // whether the module is currently on
+  amount: 50,          // one key per declared setting, at its current value
+  enabled: true,
+}
+```
+
+The `active` flag is always present, regardless of whether you declared any settings. Checking it first (and returning early when `false`) is the conventional pattern seen in every built-in module:
+
+```javascript
+onState(state) {
+  const s = state.myModule;
+  if (!s.active) {
+    // clean up any overlays or animation loops
+    n2abStop("myModule");
+    n2abRemove("n2ab-mymodule");
+    return;
+  }
+  // set up or update your module
+},
+```
+
+---
+
+## Lifecycle callbacks
+
+### onState(state)
+
+Called on every state change — including the initial mount and every time any setting value changes. Because it is called whenever *any* setting changes, `onState` is responsible both for initial setup and for reacting to live configuration updates. Tear down and rebuild overlays inside `onState` when settings that affect layout (like `corner` or `height`) change.
+
+### onToggle(active, state)
+
+Called only when the `active` flag transitions. Use this for side-effects that should fire once on activation or deactivation, such as injecting or removing a `<style>` tag:
+
+```javascript
+onToggle(active, state) {
+  if (!active) {
+    const el = document.getElementById("n2ab-clean-style");
+    if (el) el.remove();
+  }
+},
+```
+
+`onState` is always called in addition to `onToggle`, so you do not need to duplicate logic between the two.
+
+---
+
+## Overlay and animation-loop helpers
+
+`modules.js` exposes four utility functions that are available to all modules in the file.
+
+### n2abOverlay(id, css)
+
+Creates (or retrieves if it already exists) a fixed-position HUD overlay `<div>` with the given DOM `id`. The overlay is styled with the N2AB monospace font, a dark translucent background, and a subtle border — matching the built-in overlays. The optional `css` string is concatenated onto the element's `style.cssText` and lets you position it:
+
+```javascript
+// Top-left corner
+const el = n2abOverlay("n2ab-mymodule", "top:14px;left:14px;");
+
+// Bottom-centre
+const el = n2abOverlay("n2ab-mymodule", "bottom:14px;left:50%;transform:translateX(-50%);");
+```
+
+Calling `n2abOverlay` with the same `id` a second time returns the existing element without recreating it, so it is safe to call on every `onState` tick.
+
+### n2abRemove(id)
+
+Removes the overlay element with the given `id` from the DOM, if it exists. Always call this in the `!s.active` branch to clean up:
+
+```javascript
+if (!s.active) {
+  n2abStop("myModule");
+  n2abRemove("n2ab-mymodule");
+  return;
+}
+```
+
+### n2abLoop(name, fn)
+
+Starts a `requestAnimationFrame` loop identified by `name`. The callback `fn` is called every frame. Errors inside `fn` are swallowed so a single bad frame does not kill the loop. Calling `n2abLoop` with the same name while a loop is already running is a no-op — the existing loop continues:
+
+```javascript
+n2abLoop("myModule", function () {
+  el.textContent = "Speed: " + n2abSpeed().toFixed(1);
+});
+```
+
+### n2abStop(name)
+
+Cancels the animation loop registered under `name` and releases the RAF handle:
+
+```javascript
+n2abStop("myModule");
+```
+
+---
+
+## Worked example: Speed Readout module
+
+The following complete module reads the car's current speed via `n2abSpeed()` (which returns metres-per-second from the physics snapshot) and displays it in a corner overlay. A `unit` range setting lets the user switch between km/h and m/s, and a `corner` setting positions the overlay.
+
+```javascript
+__api.registerFeature("speedReadout", {
+  label: "Speed Readout",
+  description: "Live speed in a corner overlay. Choose km/h or m/s.",
+  category: "HUD",
+
+  settings: {
+    unit: {
+      type: "range",
+      label: "Unit (1 = km/h, 2 = m/s)",
+      min: 1,
+      max: 2,
+      step: 1,
+      default: 1,
+    },
+    corner: {
+      type: "range",
+      label: "Corner (1-4)",
+      min: 1,
+      max: 4,
+      step: 1,
+      default: 3,
+    },
+  },
+
+  onState: function (state) {
+    var s = state.speedReadout;
+
+    if (!s.active) {
+      n2abStop("speedReadout");
+      n2abRemove("n2ab-speed-readout");
+      return;
+    }
+
+    var positions = {
+      1: "top:14px;left:14px;",
+      2: "top:14px;right:14px;",
+      3: "bottom:14px;left:14px;",
+      4: "bottom:14px;right:14px;",
+    };
+
+    // Recreate overlay so the position updates when `corner` changes.
+    n2abRemove("n2ab-speed-readout");
+    var el = n2abOverlay("n2ab-speed-readout", positions[s.corner] || positions[3]);
+
+    n2abStop("speedReadout");
+    n2abLoop("speedReadout", function () {
+      var mps = n2abSpeed();
+      var value, suffix;
+      if (Number(s.unit) === 2) {
+        value = mps.toFixed(2);
+        suffix = " m/s";
+      } else {
+        value = (mps * 3.6).toFixed(1);
+        suffix = " km/h";
+      }
+      el.textContent = "SPD  " + value + suffix;
+    });
+  },
+});
+```
+
+After appending this block to `tools/modules.js`:
+
+```bash
+# Apply and write the bundle
+node tools/build-n2ab-client.js
+
+# Or verify without writing
+node tools/build-n2ab-client.js --check
+```
+
+Open the game, open the N2AB Client panel, and the **Speed Readout** row will appear under the **HUD** category with both settings accessible in the panel.
+
+<Tip>
+  Call `n2abRemove` before `n2abOverlay` inside `onState` whenever you need position or layout to update in response to a setting change. The overlay is recreated fresh on the next call, so the new CSS is applied immediately.
+</Tip>
+
+<Warning>
+  Never touch physics values, the leaderboard, or netcode from a module. All modules in `modules.js` are client-side and presentational only. The build tool does not enforce this, but modules that mutate game state will be rejected from the official distribution.
+</Warning>

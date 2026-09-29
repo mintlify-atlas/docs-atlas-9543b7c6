@@ -1,0 +1,153 @@
+---
+title: "N2AB Build Tool: Patch and Rebrand the Client Bundle"
+sidebarTitle: "Build Tool"
+description: "The build tool applies idempotent transforms to the pre-built N2AB Client bundle: rebranding tokens, injecting CSS, and registering custom modules."
+---
+
+The N2AB Client bundle ships pre-built and obfuscated — there are no upstream sources in this repository. Rather than editing the minified file by hand, all customisations are applied through a single repeatable transform script, `tools/build-n2ab-client.js`. Running the script any number of times always produces an identical output file, making the build safe to re-run after pulling new assets or changing module code.
+
+## What the build tool does
+
+The script performs three distinct transforms in order:
+
+1. **Rebrands string-table entries** — every `PolyTraqqq`, `PolyFly`, `ptq`, and `pf-` token inside the bundle's encoded string array is replaced with its N2AB Client equivalent.
+2. **Appends `ui-polish.css` to the panel stylesheet** — the shadow-DOM stylesheet entry is located by its `:host{all:initial` prefix, and `tools/ui-polish.css` is appended after a `/* n2ab-ui-polish */` marker so the injection is idempotent.
+3. **Registers extra modules from `modules.js`** — the module bootstrap anchor (`_0x420600()`) is found and the contents of `tools/modules.js` are wrapped in a self-calling function and injected between `/*<n2ab-modules>*/` … `/*</n2ab-modules>*/` guards. A previous injection is stripped first, so re-running is safe.
+
+## Usage
+
+```bash
+node tools/build-n2ab-client.js          # apply all transforms, write n2ab_client.bundle.js
+node tools/build-n2ab-client.js --check  # verify only — reads the bundle but writes nothing
+```
+
+<Steps>
+
+<Step title="Run the build">
+  Execute `node tools/build-n2ab-client.js` from the repository root. The script reads `n2ab_client.bundle.js`, applies the three transforms, validates the result, and overwrites the bundle in place.
+</Step>
+
+<Step title="Check the console output">
+  A successful run prints four lines:
+
+  ```
+  strings rebranded : <n>
+  checksum rotations: 348 (must be 348)
+  brand leftovers   : 0
+  stylesheet entry  : #<index>
+  ```
+
+  If `checksum rotations` is not `348`, or if `brand leftovers` is non-zero, the script throws and does **not** write the file.
+</Step>
+
+<Step title="Verify without writing">
+  Use `--check` in CI or before committing to confirm the bundle is already in the expected state without touching the file on disk.
+</Step>
+
+</Steps>
+
+## Idempotency
+
+Every injection point is guarded by a marker that the script strips before re-injecting, so running the build twice produces a byte-for-byte identical file. The CSS marker is `/* n2ab-ui-polish */`; the module block is fenced with `/*<n2ab-modules>*/` … `/*</n2ab-modules>*/`.
+
+## How the string array works
+
+All string literals in the bundle live in a single array declared as:
+
+```js
+function _0x2b4a(){ var _0x5d167e = [ /* encoded entries */ ] }
+```
+
+Each entry is encoded with a custom base64-ish alphabet (implemented in `tools/obfuscated-string-codec.js`). At runtime the array is **rotated** — elements are shifted off the front and pushed to the back — until a checksum computed over nine specific entries equals `0xe681e`. For this build that takes exactly **348 rotations**.
+
+Because indices are resolved after rotation, rewriting a value in place is safe: the position of any given entry in the pre-rotation array has no bearing on what index the runtime will look it up at. The build tool decodes each entry, applies `rebrandText()`, and re-encodes using the same alphabet.
+
+## `CHECKSUM_INDICES` — entries that must never change
+
+Nine entries feed the rotation checksum. Modifying any of them causes the runtime loader to spin forever, hanging the game. These entries are pinned and skipped by the build tool:
+
+<Warning>
+  Never rewrite the entries at these pre-rotation positions. The build tool skips them automatically, but any manual edit to `n2ab_client.bundle.js` that touches these slots will break the client at startup.
+</Warning>
+
+The raw hex offsets from source (each minus `BASE = 0x14d` to get the zero-based array index):
+
+```
+0x60b, 0x4ae, 0x1176, 0xcd7, 0x53b, 0x8a2, 0x1d4, 0x5d0, 0x5f7
+```
+
+The checksum formula applied during rotation (using `BASE = 0x14d`):
+
+```js
+const sum =
+  -parseInt(at(0x60b)) / 1 +
+  (-parseInt(at(0x4ae)) / 2) * (-parseInt(at(0x1176)) / 3) +
+  -parseInt(at(0xcd7)) / 4 +
+   parseInt(at(0x53b)) / 5 +
+   parseInt(at(0x8a2)) / 6 +
+  (-parseInt(at(0x1d4)) / 7) * (-parseInt(at(0x5d0)) / 8) +
+   parseInt(at(0x5f7)) / 9;
+// target: sum === 0xe681e
+```
+
+## Rebrand rules
+
+The `rebrandText()` function applies a deterministic ordered chain of string replacements. The replacements are applied in the order shown; earlier replacements take precedence.
+
+| Input token | Replacement | Notes |
+|---|---|---|
+| `PolyTraqqq Cheat Client` | `N2AB Client` | Matched before the generic `PolyTraqqq` rule |
+| `PolyTraqqq` | `N2AB Client` | Display name |
+| `polytraqqq` | `n2abclient` | Lowercase identifier |
+| `POLYFLY_` | `N2AB_` | Uppercase constant prefix |
+| `POLYFLY` | `N2AB` | Uppercase constant |
+| `PTQ_` | `N2AB_` | Uppercase constant prefix |
+| `__polyFlyCmd` | `__n2abCmd` | Internal command identifier |
+| `__polyflyWasm` | `__n2abWasm` | Wasm bridge identifier |
+| `__polyfly` | `__n2ab` | Generic internal prefix |
+| `__ptq` | `__n2ab` | Alternative internal prefix |
+| `__pf` | `__n2ab` | Short internal prefix |
+| `polyfly` | `n2ab` | Lowercase identifier |
+| `--ptq-` | `--n2ab-` | CSS custom property prefix |
+| `--pf-` | `--n2-` | Short CSS custom property prefix |
+| `text-pf-` | `text-n2-` | Tailwind-style utility class |
+| `bg-pf-` | `bg-n2-` | Tailwind-style utility class |
+| `border-pf-` | `border-n2-` | Tailwind-style utility class |
+| `pf-` (word boundary) | `n2-` | Generic short class prefix |
+| `ptqShake` / `ptq[A-Z]…` | `n2abShake` / `n2ab[A-Z]…` | camelCase identifiers and `@keyframes` names |
+| `ptq-` | `n2ab-` | Kebab-case identifier prefix |
+| `ptq` (word boundary) | `n2ab` | Bare word |
+
+## `KEEP_HOST`: the one domain that is never renamed
+
+`polytraqqq.com` is deliberately excluded from all substitutions. It is both the live-update server and the logo host. Renaming it would break the auto-updater and cause the panel logo to 404.
+
+<Note>
+  The build tool temporarily replaces `polytraqqq.com` with a null-byte sentinel (`\u0000KEEPHOST\u0000`) before applying all other substitutions, then restores the original domain. You will never see `n2abclient.com` in the output bundle.
+</Note>
+
+## Build failure conditions
+
+The script throws and writes nothing if any of the following are true:
+
+- The string array anchor `function _0x2b4a(){var _0x5d167e=[` is not found — bundle layout has changed.
+- After patching, rotation to checksum `0xe681e` does not complete in exactly **348** steps.
+- Any entry in the rewritten string table still matches `/polytraqqq(?!\.com)|polyfly|\bptq|__pf[A-Z]|\bpf-/i`.
+- The final source string is not valid JavaScript (checked via `vm.Script`).
+
+## Files involved
+
+<CardGroup cols={2}>
+  <Card title="build-n2ab-client.js" icon="hammer">
+    Main transform script. Rebrand + CSS injection + module registration + safety checks.
+  </Card>
+  <Card title="modules.js" icon="puzzle-piece">
+    Extra feature modules injected into the panel at build time.
+  </Card>
+  <Card title="ui-polish.css" icon="paintbrush">
+    Panel restyle rules appended to the shadow-DOM stylesheet.
+  </Card>
+  <Card title="obfuscated-string-codec.js" icon="code">
+    `encode` / `decode` functions for the bundle's custom base64 alphabet.
+  </Card>
+</CardGroup>

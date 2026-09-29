@@ -1,0 +1,212 @@
+---
+title: "Running N2AB Client as an Electron Desktop App"
+sidebarTitle: "Electron App"
+description: "Package and run N2AB Client as a standalone Electron desktop application with auto-update, fullscreen toggle, single-instance lock, and screen capture support."
+---
+
+The Electron wrapper in `electron/main.js` loads the N2AB Client game inside a `BrowserWindow` and adds a thin layer of desktop-specific features: single-instance enforcement, a fullscreen toggle, locked navigation, an origin header override that satisfies the game server, screen-capture support for the replay system, and a built-in auto-updater that patches `app.asar` in place before launching. A preload script exposes a narrow IPC bridge to the renderer so the game page can call these features without `nodeIntegration`.
+
+## Running and building
+
+<Steps>
+
+<Step title="Development run">
+  The `preelectron` npm hook compiles the webpack bundle before launching:
+
+  ```bash
+  npm run electron
+  # equivalent to: npm run preelectron && electron ./dist
+  ```
+
+  The preelectron step sets `TARGET=electron` and runs webpack in development mode, producing the bundle under `./dist`.
+</Step>
+
+<Step title="Distribution build">
+  To package a distributable application, run:
+
+  ```bash
+  npm run build-electron
+  ```
+
+  This invokes `electron/build.js` via `@electron/packager` to produce a platform-specific application bundle.
+</Step>
+
+</Steps>
+
+## Key Electron features
+
+### Single-instance lock
+
+When the app starts it calls `app.requestSingleInstanceLock()`. If a second instance is launched, it is immediately quit and the existing window is restored and focused:
+
+```js
+const singleInstanceLockSucessful = app.requestSingleInstanceLock();
+singleInstanceLockSucessful
+  ? app.on("second-instance", () => {
+      if (browserWindow !== null) {
+        if (browserWindow.isMinimized()) browserWindow.restore();
+        browserWindow.focus();
+      }
+    })
+  : app.quit();
+```
+
+### Window configuration
+
+The `BrowserWindow` is created with `fullscreen: true` and `autoHideMenuBar: true`. The menu is also explicitly removed with `browserWindow.removeMenu()`. The minimum window size is 320 × 200.
+
+### Fullscreen toggle
+
+Pressing **F11** or **Alt+Enter** toggles fullscreen. Key-repeat events are ignored so a held key does not flicker:
+
+```js
+browserWindow.webContents.on("before-input-event", (e, n) => {
+  if (n.isAutoRepeat || n.type !== "keyDown") return;
+  if (n.code === "F11" || (n.alt && n.code === "Enter")) {
+    browserWindow.setFullScreen(!browserWindow.isFullScreen());
+    e.preventDefault();
+  }
+});
+```
+
+### DevTools shortcut
+
+**F12** or **Ctrl+Shift+I** opens the DevTools panel in detached mode. Pressing the shortcut again while DevTools are open closes them:
+
+```js
+if (k === "F12" || (input.control && input.shift && (k === "I" || k === "i"))) {
+  browserWindow.webContents.isDevToolsOpened()
+    ? browserWindow.webContents.closeDevTools()
+    : browserWindow.webContents.openDevTools({ mode: "detach" });
+  e.preventDefault();
+}
+```
+
+### Navigation lock
+
+The `will-navigate` event is cancelled on all `WebContents`, preventing the page from redirecting to an external URL:
+
+```js
+contents.on("will-navigate", (e, url) => { e.preventDefault(); });
+```
+
+Links that should open in the system browser (payment page, Kodub terms, privacy, Discord, and the OpenGameArt music credit) are opened via `shell.openExternal` through the `setWindowOpenHandler` callback instead.
+
+### Origin header override
+
+All outgoing requests have their `Origin` header set to `https://app-polytrack-desktop.kodub.com` so the game server accepts the desktop client:
+
+```js
+session.defaultSession.webRequest.onBeforeSendHeaders(
+  { urls: ["<all_urls>"] },
+  (details, callback) => {
+    details.requestHeaders.Origin = "https://app-polytrack-desktop.kodub.com";
+    callback({ requestHeaders: details.requestHeaders });
+  }
+);
+```
+
+### Screen capture
+
+Display media requests are handled by querying `desktopCapturer` for the first available screen source, enabling in-game replay recording without a user prompt:
+
+```js
+session.defaultSession.setDisplayMediaRequestHandler((req, callback) => {
+  desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })
+    .then(sources => { callback(sources[0] ? { video: sources[0] } : {}); })
+    .catch(() => { try { callback({}); } catch (_) {} });
+});
+```
+
+## IPC bridge (preload.js)
+
+The preload script uses Electron's `contextBridge` to expose a `window.electron` object to the renderer. This is the complete API:
+
+| Method | IPC channel | Description |
+|---|---|---|
+| `electron.quit()` | `quit` (send) | Calls `app.quit()` in the main process. |
+| `electron.isFullscreen()` | `is-fullscreen` (sendSync) | Returns `true` if the window is currently fullscreen. |
+| `electron.setFullscreen(bool)` | `set-fullscreen` (send) | Programmatically enters or exits fullscreen. |
+| `electron.getArgv()` | `get-argv` (sendSync) | Returns `process.argv` from the main process. |
+| `electron.log(msg)` | `log-message` (send) | Logs a message to the main-process stdout. |
+| `electron.addFullscreenChangeListener(fn)` | `fullscreen-change` (on) | Registers a callback that fires whenever the fullscreen state changes. |
+
+```js
+// preload.js (contextBridge registration)
+contextBridge.exposeInMainWorld("electron", {
+  quit: () => ipcRenderer.send("quit"),
+  addFullscreenChangeListener: fn => ipcRenderer.on("fullscreen-change", () => fn()),
+  isFullscreen: () => ipcRenderer.sendSync("is-fullscreen"),
+  setFullscreen: v => ipcRenderer.send("set-fullscreen", v),
+  getArgv: () => ipcRenderer.sendSync("get-argv"),
+  log: msg => ipcRenderer.send("log-message", msg),
+});
+```
+
+## Auto-updater
+
+The N2AB updater runs once after the splash screen finishes loading. It compares a SHA-256 hash of the running `app.asar` against a remote manifest and, if they differ, downloads and verifies the new asar before spawning a small Node helper script that swaps the file and relaunches the app.
+
+<Steps>
+
+<Step title="Fetch manifest">
+  A JSON manifest is downloaded from `https://pay.pcsmp.net/files/n2ab.json`. The manifest must contain `sha256` and `url` fields.
+</Step>
+
+<Step title="Hash the running asar">
+  The main process reads `<resourcesPath>/app.asar` via `original-fs` (bypassing Electron's asar interception) and computes its SHA-256 digest.
+</Step>
+
+<Step title="Compare">
+  If the digest matches `manifest.sha256`, the update is skipped and the game loads. The `state: "uptodate"` message is sent to the splash screen.
+</Step>
+
+<Step title="Download and verify">
+  If hashes differ, the new asar is downloaded to `<asarPath>.new`, its SHA-256 is verified against `manifest.sha256`, and `state: "downloading"` → `state: "verifying"` messages are sent.
+</Step>
+
+<Step title="Swap and relaunch">
+  A temporary helper script is written to the system temp directory and spawned as a detached Node process (`ELECTRON_RUN_AS_NODE=1`). The helper retries renaming the new asar over the old one every 200 ms for up to 50 attempts, then relaunches the Electron executable. The current process quits after 400 ms.
+</Step>
+
+</Steps>
+
+### Skipping and overriding updates
+
+| Method | Effect |
+|---|---|
+| `--no-update` CLI flag | Skips the update check entirely; loads the game immediately with `state: "skipped"`. |
+| `N2AB_NO_UPDATE=1` env var | Same as `--no-update`. |
+| `--manifest=<URL>` CLI flag | Uses the given URL as the manifest endpoint instead of the default. |
+| `N2AB_MANIFEST=<URL>` env var | Same as `--manifest=<URL>`. |
+
+<Tip>
+  During local development, set `N2AB_NO_UPDATE=1` to avoid the network round-trip and load the game instantly.
+</Tip>
+
+## Linux / Wayland
+
+On Linux, the main process forces the `ozone-platform-hint` Chromium switch to `x11` by default to avoid compositing issues. Set `N2AB_WAYLAND=1` to disable this override and let Electron use Wayland natively:
+
+```bash
+N2AB_WAYLAND=1 npm run electron
+```
+
+## Splash screen (`n2ab_client.splash.html`)
+
+The splash screen is loaded first while the updater runs. It renders the N2AB logo and a status message, and exposes a `window.n2ab(data)` callback that the main process calls via `executeJavaScript` to update the UI.
+
+| `state` value | Splash behaviour |
+|---|---|
+| `local` | Updates the version/build label with the locally-known build number. |
+| `info` | Shows the from-build → to-build upgrade arrow in the version label. |
+| `downloading` | Hides the spinner, shows the striped progress bar; updates `pct`, bytes received, and total. |
+| `verifying` | Shows "Verifying download" message. |
+| `restarting` | Shows "Restarting" message. |
+| `uptodate` | Hides the spinner; shows "Up to date" with the confirmed build number. |
+| `skipped` | Hides the spinner; shows "Update check skipped" and appends a `DEV` badge to the build label. |
+| `error` | Hides the spinner; shows "Launching" and proceeds to load the game after a short delay. |
+
+<Note>
+  The splash screen is a plain HTML file — it does not depend on Node.js or any Electron API. It is safe to open in a browser for styling work.
+</Note>

@@ -1,0 +1,199 @@
+---
+title: "Render Modules: Performance Overlay, Clean Screen, Panel Theme"
+sidebarTitle: "Render Modules"
+description: "Three Render-category modules in N2AB Client: Performance Overlay for FPS and frame time, Clean Screen for cinematic capture, and Panel Theme for custom accent colors."
+---
+
+N2AB Client ships three Render-category modules that handle the visual layer of the client experience. Unlike HUD modules — which overlay race telemetry — Render modules affect how the page itself is displayed: how the performance of the renderer is reported, which native game elements are visible, and what colour palette the panel and overlays use. None of these modules touch physics state or network communication.
+
+---
+
+## Performance Overlay (`perfOverlay`)
+
+The Performance Overlay places a compact corner readout on screen that shows live FPS, smoothed frame time in milliseconds, and 1% low FPS calculated over a rolling window of up to 600 frames. It is the fastest way to confirm whether the browser renderer is keeping pace with the game's physics tick.
+
+Frame time is smoothed with an **exponential moving average** (EMA, α = 0.1) so the `ms` reading stays readable under normal frame variance without masking genuine slowdowns:
+
+```javascript
+n2abPerf.ms = n2abPerf.ms * 0.9 + dt * 0.1;  // EMA: 90% old, 10% new
+var fps = 1000 / Math.max(n2abPerf.ms, 0.0001);
+```
+
+The 1% low is computed by collecting all frame deltas in `n2abPerf.p1` (capped at 600 entries), sorting them descending, and taking the FPS equivalent of the top 1% worst frame:
+
+```javascript
+var sorted = n2abPerf.p1.slice().sort(function (a, b) { return b - a; });
+var low = 1000 / sorted[Math.floor(sorted.length * 0.01)];
+```
+
+### Corner positions
+
+The `corner` setting maps to a fixed CSS position. The overlay's `top`, `bottom`, `left`, and `right` properties are cleared and re-applied each time `onState` fires, so switching corners is instant.
+
+| `corner` value | Position |
+|---|---|
+| `1` | Top-left (`top: 14px; left: 14px`) |
+| `2` | Top-right (`top: 14px; right: 14px`) |
+| `3` | Bottom-left (`bottom: 14px; left: 14px`) |
+| `4` | Bottom-right (`bottom: 14px; right: 14px`) |
+
+### Settings
+
+| Setting | Type | Range | Default | Description |
+|---|---|---|---|---|
+| `showFrameTime` | bool | — | `true` | Show the `ms` row (smoothed frame time) |
+| `showLows` | bool | — | `true` | Show the `1%` lows row (requires ≥ 30 samples) |
+| `corner` | range | 1 – 4, step 1 | `1` | Screen corner to anchor the overlay |
+
+### State shape
+
+```javascript
+// state.perfOverlay when active
+{
+  active: true,
+  showFrameTime: true,
+  showLows: true,
+  corner: 1       // 1 = top-left, 2 = top-right, 3 = bottom-left, 4 = bottom-right
+}
+```
+
+### Overlay output format
+
+```
+FPS   144
+ms     6.9
+1%   118
+```
+
+<Note>
+  The 1% lows row only appears after at least 30 frames have been collected. On first activation you will see just the FPS and ms rows for a brief moment.
+</Note>
+
+---
+
+## Clean Screen (`cleanScreen`)
+
+Clean Screen is a capture-focused utility that injects a `<style>` element into `document.head` to set `opacity: 0` on selected native game UI elements. This produces a clean, overlay-free view of the track for screenshots and video recording without requiring any changes to the game source.
+
+The module uses `mode: "toggle"` — the same switch that activates it is the one that deactivates it, letting you bind a hotkey to quickly preview the clean view and toggle back.
+
+The full list of hidden selectors, taken directly from the source:
+
+```javascript
+var hide = [
+  ".speedometer-ui",
+  ".checkpoint-ui",
+  ".game-toolbar-ui",
+  ".hint-ui",
+  ".input-visualizer-ui",
+  ".player-list-ui",
+];
+if (!s.keepTimer) hide.push(".timer-ui");
+
+// Injected CSS:
+// #ui .speedometer-ui, #ui .checkpoint-ui, ... { opacity: 0 !important; transition: opacity .2s }
+```
+
+Using `opacity: 0` (rather than `display: none`) means the native game's layout is preserved and elements fade out with a 0.2 s transition, which looks clean when toggling during a recording.
+
+### Settings
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `keepTimer` | bool | `false` | When `true`, the `.timer-ui` element is **not** hidden — useful when you want a clean background but still need the race timer visible in captures |
+
+### State shape
+
+```javascript
+// state.cleanScreen when active
+{
+  active: true,
+  keepTimer: false   // bool — whether to leave .timer-ui visible
+}
+```
+
+<Tip>
+  Set `keepTimer: true` when recording speedrun attempts. The timer stays visible for verification while all other HUD chrome is hidden.
+</Tip>
+
+### Hidden elements reference
+
+| Selector | Native element |
+|---|---|
+| `.speedometer-ui` | In-game speedometer |
+| `.checkpoint-ui` | Checkpoint indicator |
+| `.game-toolbar-ui` | Toolbar at the top of the game screen |
+| `.hint-ui` | Tutorial / control hint popups |
+| `.input-visualizer-ui` | Native input visualiser (separate from the N2AB Input Display module) |
+| `.player-list-ui` | Multiplayer player list |
+| `.timer-ui` | Race timer (hidden unless `keepTimer: true`) |
+
+---
+
+## Panel Theme (`theme`)
+
+Panel Theme overrides the N2AB Client's CSS custom properties to recolour the panel and all overlays in real time. Adjusting the hue slider shifts the entire accent colour family to any point in the spectrum; the dim slider darkens the computed lightness values to suit different ambient lighting conditions or personal preference.
+
+The module writes a `<style>` element into `document.head` containing a `:root {}` block that overrides four custom properties used throughout the client:
+
+```javascript
+var hue = Number(s.hue) || 0;
+var dim = (Number(s.dim) || 0) / 100;
+var l   = Math.round(60 - dim * 12);   // lightness: 60% at dim=0, 48% at dim=100
+
+// Generated CSS:
+// :root {
+//   --n2ab-red:      hsl(<hue>, 100%, <l>%);
+//   --n2ab-red-hi:   hsl(<hue>, 100%, <l+4>%);
+//   --n2ab-red-deep: hsl(<hue>,  78%, <l-22>%);
+//   --n2ab-red-glow: hsla(<hue>, 100%, <l>%, .45);
+// }
+```
+
+### CSS custom properties
+
+| Property | Role |
+|---|---|
+| `--n2ab-red` | Primary accent colour — button highlights, active states |
+| `--n2ab-red-hi` | Slightly lighter variant for hover and focus rings |
+| `--n2ab-red-deep` | Darker, lower-saturation tint for shadows and pressed states |
+| `--n2ab-red-glow` | Semi-transparent glow used in box-shadow and backdrop effects |
+
+### Settings
+
+| Setting | Type | Range | Default | Description |
+|---|---|---|---|---|
+| `hue` | range | 0 – 360, step 5 | `0` | Hue angle for the accent colour family (0 = default red) |
+| `dim` | range | 0 – 100, step 5 | `0` | Reduces lightness of all accent variants; 100 knocks 12 percentage points off the base lightness |
+
+### State shape
+
+```javascript
+// state.theme when active
+{
+  active: true,
+  hue: 0,    // integer 0–360 — hue angle in degrees
+  dim: 0     // integer 0–100 — surface darkness
+}
+```
+
+<Note>
+  Setting `hue: 0` with `dim: 0` exactly reproduces the default N2AB red. You can disable the theme module entirely to restore defaults without adjusting the sliders.
+</Note>
+
+### Example — teal accent at medium brightness
+
+```javascript
+// state.theme producing a teal accent
+{
+  active: true,
+  hue: 175,   // teal hue
+  dim: 20     // slightly dimmed: l = Math.round(60 - 0.20 * 12) = 58
+}
+
+// Resulting CSS custom properties:
+// --n2ab-red:      hsl(175, 100%, 58%)
+// --n2ab-red-hi:   hsl(175, 100%, 62%)
+// --n2ab-red-deep: hsl(175,  78%, 36%)
+// --n2ab-red-glow: hsla(175, 100%, 58%, .45)
+```

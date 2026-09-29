@@ -1,0 +1,332 @@
+---
+title: "Module Settings API: range, bool, and text Fields"
+sidebarTitle: "Settings API"
+description: "Declare per-module settings with range sliders, boolean toggles, and text inputs. Settings persist automatically under the N2AB_SETTINGS localStorage key."
+---
+
+When you register a module with `__api.registerFeature`, the optional `settings` object declares the configuration controls that appear in the panel beneath that module's row. Each key in `settings` maps to a named value in the state object, and the panel renders the appropriate input widget — slider, toggle, or text field — automatically. This page documents every field type, its configuration options, how values appear in `onState`, and how persistence works.
+
+## Overview
+
+The `settings` object is a plain key-value map where each value is a field descriptor. The key becomes the property name on the module's state slice, and the descriptor's `type` field determines both the widget rendered in the panel and the JavaScript type of the value at runtime:
+
+```javascript
+__api.registerFeature("myModule", {
+  label: "My Module",
+  category: "HUD",
+  settings: {
+    speed:   { type: "range", label: "Speed",   min: 0,  max: 200, step: 10, default: 80  },
+    enabled: { type: "bool",  label: "Enabled",                              default: true },
+    tag:     { type: "text",  label: "Tag",                        maxLength: 12, default: "N2AB" },
+  },
+  onState(state) {
+    const s = state.myModule;
+    // s.active  → boolean
+    // s.speed   → number  (e.g. 80)
+    // s.enabled → boolean (e.g. true)
+    // s.tag     → string  (e.g. "N2AB")
+  },
+});
+```
+
+Three types are supported: `range`, `bool`, and `text`.
+
+---
+
+## range
+
+A `range` field renders as a labeled horizontal slider in the panel. The value in state is always a `number`.
+
+<ParamField path="type" type="string" required>
+  Must be `"range"`.
+</ParamField>
+
+<ParamField path="label" type="string" required>
+  Human-readable label shown above or beside the slider in the panel.
+</ParamField>
+
+<ParamField path="min" type="number" required>
+  The minimum value the slider can reach.
+</ParamField>
+
+<ParamField path="max" type="number" required>
+  The maximum value the slider can reach.
+</ParamField>
+
+<ParamField path="step" type="number" required>
+  The increment between selectable values. Use `1` for integer-only sliders.
+</ParamField>
+
+<ParamField path="default" type="number" required>
+  The value used on first load before the user has adjusted the slider, and whenever the setting has no persisted entry.
+</ParamField>
+
+**Example — corner picker (integers 1–4):**
+
+```javascript
+corner: {
+  type: "range",
+  label: "Corner (1-4)",
+  min: 1,
+  max: 4,
+  step: 1,
+  default: 1,
+},
+```
+
+In `onState`, read it as a number. Cast explicitly with `Number()` to be safe, because persisted values are round-tripped through JSON:
+
+```javascript
+onState(state) {
+  const s = state.perfOverlay;
+  const spots = {
+    1: "top:14px;left:14px;",
+    2: "top:14px;right:14px;",
+    3: "bottom:14px;left:14px;",
+    4: "bottom:14px;right:14px;",
+  };
+  const pos = spots[Number(s.corner)] || spots[1];
+},
+```
+
+**Example — window duration (3–30 seconds):**
+
+```javascript
+seconds: {
+  type: "range",
+  label: "Window (s)",
+  min: 3,
+  max: 30,
+  step: 1,
+  default: 10,
+},
+```
+
+**Example — scale percentage (60–200%):**
+
+```javascript
+scale: {
+  type: "range",
+  label: "Scale (%)",
+  min: 60,
+  max: 200,
+  step: 10,
+  default: 100,
+},
+```
+
+---
+
+## bool
+
+A `bool` field renders as a toggle switch in the panel. The value in state is a `boolean`.
+
+<ParamField path="type" type="string" required>
+  Must be `"bool"`.
+</ParamField>
+
+<ParamField path="label" type="string" required>
+  Human-readable label shown beside the toggle in the panel.
+</ParamField>
+
+<ParamField path="default" type="boolean" required>
+  The initial value before the user has interacted with the toggle.
+</ParamField>
+
+**Example — show frame time:**
+
+```javascript
+showFrameTime: {
+  type: "bool",
+  label: "Show frame time",
+  default: true,
+},
+```
+
+**Example — keep timer visible:**
+
+```javascript
+keepTimer: {
+  type: "bool",
+  label: "Keep timer visible",
+  default: false,
+},
+```
+
+In `onState`, use the value directly as a boolean condition:
+
+```javascript
+onState(state) {
+  const s = state.perfOverlay;
+  let out = "FPS  " + fps.toFixed(0);
+  if (s.showFrameTime) out += "\nms   " + ms.toFixed(1);
+  if (s.showLows)      out += "\n1%   " + low.toFixed(0);
+  el.textContent = out;
+},
+```
+
+---
+
+## text
+
+A `text` field renders as a single-line text input in the panel. The value in state is a `string`.
+
+<ParamField path="type" type="string" required>
+  Must be `"text"`.
+</ParamField>
+
+<ParamField path="label" type="string" required>
+  Human-readable label shown above or beside the text input.
+</ParamField>
+
+<ParamField path="default" type="string" required>
+  The string used before the user has typed anything.
+</ParamField>
+
+<ParamField path="maxLength" type="number">
+  Optional maximum character count enforced by the input widget.
+</ParamField>
+
+**Example — custom overlay label:**
+
+```javascript
+tag: {
+  type: "text",
+  label: "Overlay label",
+  default: "SPD",
+  maxLength: 8,
+},
+```
+
+In `onState`, use the value as a plain string:
+
+```javascript
+onState(state) {
+  const s = state.speedReadout;
+  el.textContent = s.tag + "  " + (n2abSpeed() * 3.6).toFixed(1) + " km/h";
+},
+```
+
+---
+
+## How settings appear in the state object
+
+`onState` receives the whole registry state. Your module's slice is at `state[name]` and contains `active` plus one property per declared setting, keyed by the name you used in the `settings` map:
+
+```javascript
+// Given this settings block:
+settings: {
+  corner:        { type: "range", label: "Corner (1-4)", min: 1, max: 4, step: 1, default: 1 },
+  showFrameTime: { type: "bool",  label: "Show frame time", default: true },
+  showLows:      { type: "bool",  label: "Show 1% lows",    default: true },
+},
+
+// state.perfOverlay looks like:
+{
+  active:        true,
+  corner:        1,      // number
+  showFrameTime: true,   // boolean
+  showLows:      true,   // boolean
+}
+```
+
+`onState` is called every time any value in state changes — including when the user moves a slider — so your module will always receive the latest values without any manual subscription.
+
+---
+
+## Persistence
+
+By default, every setting value is persisted to `localStorage` under the key `N2AB_SETTINGS` as a JSON object. The structure is a flat map of `"moduleName.settingKey"` → value. When the page loads, the client reads this key and restores all saved values before the first `onState` call, so users do not lose their configuration between sessions.
+
+### Opting out with transient
+
+Pass `transient: true` on the descriptor to skip persistence for the entire module. Neither `active` nor any of its settings will be written to `localStorage`:
+
+```javascript
+__api.registerFeature("sessionStats", {
+  label: "Session Stats",
+  category: "HUD",
+  transient: true,   // ← resets to defaults on every page load
+  settings: {
+    resetOnRun: { type: "bool", label: "Reset each run", default: false },
+  },
+  onState(state) { /* ... */ },
+});
+```
+
+<Note>
+  `transient: true` is a module-level flag — it applies to all settings for that module. There is no per-field transient option; if you need some settings to persist and others not to, split them into separate modules.
+</Note>
+
+---
+
+## Complete example: all three types together
+
+The following settings block combines all three field types, as you might use them in a heads-up display module that shows a labelled speed readout:
+
+```javascript
+__api.registerFeature("labelledSpeed", {
+  label: "Labelled Speed",
+  description: "Speed readout with a customisable label, unit, and position.",
+  category: "HUD",
+
+  settings: {
+    // range: overlay corner position
+    corner: {
+      type: "range",
+      label: "Corner (1-4)",
+      min: 1,
+      max: 4,
+      step: 1,
+      default: 3,
+    },
+
+    // bool: whether to convert m/s to km/h
+    convertToKmh: {
+      type: "bool",
+      label: "Show km/h",
+      default: true,
+    },
+
+    // text: prefix label shown before the number
+    prefix: {
+      type: "text",
+      label: "Prefix label",
+      default: "SPD",
+      maxLength: 6,
+    },
+  },
+
+  onState: function (state) {
+    var s = state.labelledSpeed;
+
+    if (!s.active) {
+      n2abStop("labelledSpeed");
+      n2abRemove("n2ab-labelled-speed");
+      return;
+    }
+
+    var positions = {
+      1: "top:14px;left:14px;",
+      2: "top:14px;right:14px;",
+      3: "bottom:14px;left:14px;",
+      4: "bottom:14px;right:14px;",
+    };
+
+    n2abRemove("n2ab-labelled-speed");
+    var el = n2abOverlay("n2ab-labelled-speed", positions[Number(s.corner)] || positions[3]);
+
+    n2abStop("labelledSpeed");
+    n2abLoop("labelledSpeed", function () {
+      var raw = n2abSpeed();
+      var value = s.convertToKmh ? (raw * 3.6).toFixed(1) + " km/h"
+                                  : raw.toFixed(2) + " m/s";
+      el.textContent = (s.prefix || "SPD") + "  " + value;
+    });
+  },
+});
+```
+
+<Tip>
+  Always cast `range` values with `Number()` before arithmetic or object-key lookups. Values loaded from `localStorage` are parsed from JSON and will be numbers, but defensive casting costs nothing and prevents subtle bugs when defaults are strings in older configs.
+</Tip>

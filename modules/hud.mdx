@@ -1,0 +1,199 @@
+---
+title: "HUD Modules: Speed Graph, Splits, Input Display, Session Stats"
+sidebarTitle: "HUD Modules"
+description: "Four HUD modules in N2AB Client: Speed Graph rolling trace, Checkpoint Splits with delta, Input Display for WASD keys, and Session Stats totals."
+---
+
+N2AB Client's four HUD modules overlay live race telemetry directly onto the PolyTrack viewport. Each module runs its own `requestAnimationFrame` loop that is started when the module is activated and cancelled the moment it is toggled off, so there is zero CPU cost when a module is disabled. All modules read from snapshot globals populated by the client's physics hook — they never modify game state.
+
+---
+
+## Speed Graph (`speedGraph`)
+
+The Speed Graph draws a rolling canvas trace of your vehicle speed in km/h, making it easy to see exactly where you bleed momentum through corners or off jumps. The graph is positioned at **bottom centre** of the screen and rendered on a `<canvas>` element that is DPI-scaled at 2× for crisp display on high-resolution monitors.
+
+Speed is computed each frame from the linear velocity snapshot:
+
+```javascript
+function n2abSpeed() {
+  var s = g.__n2abSnap && g.__n2abSnap.linVel;
+  if (!s) return 0;
+  return Math.sqrt(s.x * s.x + s.y * s.y + s.z * s.z); // m/s
+}
+// converted to km/h: n2abSpeed() * 3.6
+```
+
+The rolling buffer collects one sample per animation frame and caps its length at `seconds × 60` frames (assuming 60 fps). The Y-axis ceiling is rounded up to the nearest 25 km/h automatically.
+
+### Settings
+
+| Setting | Type | Range | Default | Description |
+|---|---|---|---|---|
+| `seconds` | range | 3 – 30 s, step 1 | `10` | How many seconds of history the graph shows |
+| `height` | range | 40 – 160 px, step 10 | `70` | Rendered height of the canvas element |
+
+### State shape
+
+```javascript
+// state.speedGraph when active
+{
+  active: true,
+  seconds: 10,   // integer — rolling window in seconds
+  height: 70     // integer — canvas height in px
+}
+```
+
+<Tip>
+  Widen the window (`seconds: 30`) to get a lap-level view of your speed profile. Narrow it to `3–5 s` when you want to focus on a single corner entry.
+</Tip>
+
+---
+
+## Checkpoint Splits (`splits`)
+
+The Checkpoint Splits module logs the elapsed time at each checkpoint and compares it against the best times recorded in `g.__n2abSplitBest` during the current session. The overlay is positioned at **right centre** of the screen and scrolls the most recent `keep` rows so it never grows taller than you allow.
+
+The module detects a new run automatically: if the length of `g.__n2abCheckpoints` drops below the number of splits already recorded, it resets `seen` and `t0` for the new run.
+
+```javascript
+// Simplified run-reset logic from modules.js
+if (cps.length && seen.length > cps.length) {
+  seen = [];
+  t0 = now; // performance.now() at reset
+}
+```
+
+Delta formatting mirrors what speedrun tools show — a leading `−` for ahead-of-best and `+` for behind:
+
+```javascript
+var d = best == null ? null : t - best;
+var tag = d == null
+  ? "  --  "
+  : (d <= 0 ? "-" : "+") + Math.abs(d).toFixed(2);
+```
+
+### Settings
+
+| Setting | Type | Range | Default | Description |
+|---|---|---|---|---|
+| `keep` | range | 3 – 12, step 1 | `6` | Maximum number of checkpoint rows displayed at once |
+
+### State shape
+
+```javascript
+// state.splits when active
+{
+  active: true,
+  keep: 6   // integer — rows shown in the overlay
+}
+```
+
+### Runtime globals read
+
+| Global | Description |
+|---|---|
+| `g.__n2abCheckpoints` | Array of checkpoint objects maintained by the client hook |
+| `g.__n2abSplitBest` | Array of best-run times (seconds) indexed by checkpoint number; populated by the module across runs |
+
+<Note>
+  `g.__n2abSplitBest` is **session-scoped** — it resets when you reload the page. The splits module does not persist best times to `localStorage`.
+</Note>
+
+---
+
+## Input Display (`inputDisplay`)
+
+The Input Display renders a 3×2 WASD key grid at the **bottom right** of the screen. Active keys are highlighted with a red background (`rgba(255,58,58,.85)`). The grid supports both WASD (`KeyW/KeyA/KeyS/KeyD`) and arrow keys simultaneously, so either control scheme is visualised.
+
+The grid cells are plain `<div>` elements styled with CSS grid — no canvas involved. Key state is read from `g.__n2abKeys` on every animation frame:
+
+```javascript
+// Key lookup per cell — checks both WASD and arrow key codes
+var down =
+  keys[codes[name]] ||                              // e.g. "KeyW"
+  keys["Arrow" + name.charAt(0).toUpperCase() + name.slice(1)]; // e.g. "ArrowUp"
+
+refs[name].style.background = down
+  ? "rgba(255,58,58,.85)"
+  : "rgba(255,255,255,.07)";
+refs[name].style.borderColor = down
+  ? "rgba(255,58,58,.9)"
+  : "rgba(255,255,255,.1)";
+```
+
+The grid is rebuilt from scratch each time `onState` fires (i.e. whenever you adjust the scale), so changing the scale setting applies cleanly without orphaned elements.
+
+### Settings
+
+| Setting | Type | Range | Default | Description |
+|---|---|---|---|---|
+| `scale` | range | 60 – 200 %, step 10 | `100` | Scales all key cell dimensions linearly; the base cell size is 30 px at 100 % |
+
+### State shape
+
+```javascript
+// state.inputDisplay when active
+{
+  active: true,
+  scale: 100   // integer — percentage; 100 = 30 px base cell
+}
+```
+
+### Key code mapping
+
+| Direction | WASD code | Arrow code |
+|---|---|---|
+| Up | `KeyW` | `ArrowUp` |
+| Down | `KeyS` | `ArrowDown` |
+| Left | `KeyA` | `ArrowLeft` |
+| Right | `KeyD` | `ArrowRight` |
+
+---
+
+## Session Stats (`sessionStats`)
+
+Session Stats tracks three cumulative values — top speed, average speed, and total distance travelled — for the duration of your session. The overlay sits at **top centre** of the screen. All values are derived entirely from the `n2abSpeed()` helper; no separate physics hook is required.
+
+Distance is integrated each frame from instantaneous speed and the wall-clock delta:
+
+```javascript
+var v   = n2abSpeed();      // m/s
+var kmh = v * 3.6;
+dist   += v * dt;           // dt = seconds since last frame
+```
+
+The optional `resetOnRun` setting triggers a soft reset (top, sum, n, dist back to zero) when speed falls below 0.5 km/h after at least 120 frames have been collected, which reliably catches the moment a run restarts from standstill:
+
+```javascript
+if (s.resetOnRun && kmh < 0.5 && n > 120) {
+  top = 0; sum = 0; n = 1; dist = 0;
+}
+```
+
+### Settings
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `resetOnRun` | bool | `false` | When enabled, resets all stats automatically each time the car comes to a standstill after running for more than 120 frames |
+
+### State shape
+
+```javascript
+// state.sessionStats when active
+{
+  active: true,
+  resetOnRun: false   // bool — whether to reset each run
+}
+```
+
+### Overlay output format
+
+```
+TOP     142.3 km/h
+AVG      98.7 km/h
+DIST    3401 m
+```
+
+<Warning>
+  Because distance is integrated from frame deltas, pausing the browser tab (which suspends `requestAnimationFrame`) will cause the frame delta to spike on resume. The stats module uses wall-clock time (`performance.now()`), so a very long tab pause can produce a spurious distance spike. Switch tabs only when not timing a run.
+</Warning>

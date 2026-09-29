@@ -1,0 +1,235 @@
+---
+title: "Overlay Helper Functions: n2abOverlay, n2abLoop, n2abSpeed"
+sidebarTitle: "Overlay Helpers"
+description: "Utility functions available in tools/modules.js for creating DOM overlays, running animation frame loops, reading car speed, and managing module cleanup."
+---
+
+The top of `tools/modules.js` defines five utility functions — `n2abOverlay`, `n2abRemove`, `n2abLoop`, `n2abStop`, and `n2abSpeed` — that every module in that file can call freely. They handle the repetitive work of creating fixed-position overlays, scheduling per-frame updates, and reading physics data out of the client's internal snapshot, so individual modules stay concise and focused on their own display logic.
+
+## n2abOverlay(id, css)
+
+`n2abOverlay` creates a fixed-position `<div>` overlay and appends it to `document.body`, or returns the existing element if one with the given `id` is already in the DOM. Calling it repeatedly is safe and idempotent — you get the same element back on every `onState` invocation.
+
+<ParamField path="id" type="string" required>
+  Used as the DOM element's `id` attribute. Must be unique to your module to
+  avoid colliding with other overlays. By convention, built-in modules prefix
+  their ids with `n2ab-` (e.g. `"n2ab-perf"`, `"n2ab-graph"`).
+</ParamField>
+
+<ParamField path="css" type="string">
+  Additional CSS declarations appended to the element's `style.cssText` after
+  the default styles are applied. Use this to position the overlay:
+  `"top:14px;left:14px;"`, `"bottom:14px;right:14px;"`, or a `transform` for
+  centred layouts. Pass an empty string or omit the argument if you will
+  position the element yourself afterwards.
+</ParamField>
+
+The default style applied to every new overlay is:
+
+```javascript
+"position:fixed;z-index:2147483646;pointer-events:none;" +
+'font-family:var(--n2ab-mono,ui-monospace,"JetBrains Mono",monospace);' +
+"font-size:12px;font-weight:600;letter-spacing:.04em;line-height:1.5;" +
+"color:#edeef2;background:rgba(16,16,20,.92);border:1px solid rgba(255,255,255,.09);" +
+"border-radius:12px;padding:9px 12px;white-space:pre;" +
+"box-shadow:0 18px 44px -14px rgba(0,0,0,.75);"
+```
+
+`pointer-events:none` ensures clicks pass through to the game canvas. `z-index:2147483646` keeps the overlay above all game UI.
+
+**Returns:** the `HTMLDivElement` for the overlay.
+
+```javascript
+var el = n2abOverlay("n2ab-sr", "top:14px;right:14px;");
+el.textContent = "Hello";
+```
+
+<Tip>
+  `n2abOverlay` only sets position styles at creation time. If your module
+  allows the user to change corners via a `range` setting, clear all four
+  position properties (`top`, `bottom`, `left`, `right`) then re-apply after
+  each `onState` call — exactly as the built-in `perfOverlay` module does.
+</Tip>
+
+---
+
+## n2abRemove(id)
+
+`n2abRemove` finds the element with the given `id` and removes it from the DOM. It does nothing if no such element exists, so it is safe to call unconditionally in the `!s.active` branch.
+
+<ParamField path="id" type="string" required>
+  The DOM `id` of the overlay to remove. Must match the `id` you passed to
+  `n2abOverlay`.
+</ParamField>
+
+Always pair `n2abRemove` with `n2abStop` in your cleanup path so neither a stale overlay nor a ghost rAF loop is left behind:
+
+```javascript
+if (!s.active) { n2abStop("sr"); n2abRemove("n2ab-sr"); return; }
+```
+
+---
+
+## n2abLoop(name, fn)
+
+`n2abLoop` starts a `requestAnimationFrame` loop identified by `name`. If a loop with that name is already running, the call is a no-op — this makes it safe to call `n2abLoop` on every `onState` invocation without spawning duplicate loops.
+
+<ParamField path="name" type="string" required>
+  Short identifier for this loop. Stored on the global object as
+  `__n2abRaf_<name>`. Use a concise name unique to your module — `"perf"`,
+  `"graph"`, `"keys"`, etc.
+</ParamField>
+
+<ParamField path="fn" type="function" required>
+  Called once per animation frame. Any exception thrown inside `fn` is caught
+  and discarded so the loop continues running even if your code has a transient
+  error. Do not rely on this for error handling — fix the root cause instead.
+</ParamField>
+
+The loop runs until explicitly stopped with `n2abStop`. It uses the global
+`__n2abRaf_<name>` key as a cancellation token:
+
+```javascript
+function n2abLoop(name, fn) {
+  var key = "__n2abRaf_" + name;
+  if (g[key]) return;                 // already running — do nothing
+  var tick = function () {
+    if (!g[key]) return;
+    try { fn(); } catch (e) { /* keep the loop alive */ }
+    g[key] = requestAnimationFrame(tick);
+  };
+  g[key] = requestAnimationFrame(tick);
+}
+```
+
+```javascript
+n2abLoop("sr", function() {
+  el.textContent = (n2abSpeed() * 3.6).toFixed(1) + " km/h";
+});
+```
+
+<Warning>
+  Never call `n2abLoop` with the same `name` from two different modules. The
+  second call will silently be ignored, and the first module's `fn` will keep
+  running even if that module is disabled. Use a name that is unique to your
+  module.
+</Warning>
+
+---
+
+## n2abStop(name)
+
+`n2abStop` cancels the named rAF loop by calling `cancelAnimationFrame` and zeroing the token. Does nothing if no loop with that name is currently running.
+
+<ParamField path="name" type="string" required>
+  The same name string passed to `n2abLoop`. Must match exactly.
+</ParamField>
+
+```javascript
+if (!s.active) { n2abStop("sr"); n2abRemove("n2ab-sr"); return; }
+```
+
+---
+
+## n2abSpeed()
+
+`n2abSpeed` returns the car's current speed in **metres per second** by computing the magnitude of the velocity vector from the physics snapshot that the N2AB Client patches into `window.__n2abSnap`.
+
+**Returns:** `number` — speed in m/s, or `0` if the snapshot is not yet available (before the first physics tick).
+
+The full implementation:
+
+```javascript
+function n2abSpeed() {
+  try {
+    var s = g.__n2abSnap && g.__n2abSnap.linVel;
+    if (!s) return 0;
+    return Math.sqrt(s.x * s.x + s.y * s.y + s.z * s.z);
+  } catch (e) { return 0; }
+}
+```
+
+To convert to **kilometres per hour**, multiply by `3.6`:
+
+```javascript
+var kmh = n2abSpeed() * 3.6;
+```
+
+This is the exact conversion used in the built-in `speedGraph` and `sessionStats` modules:
+
+```javascript
+// speedGraph
+var kmh = n2abSpeed() * 3.6;
+pts.push(kmh);
+
+// sessionStats
+var v = n2abSpeed();
+var kmh = v * 3.6;
+if (kmh > top) top = kmh;
+dist += v * dt;          // distance uses raw m/s × seconds = metres
+```
+
+<Note>
+  `n2abSpeed()` is safe to call every frame inside a `n2abLoop` callback —
+  it is a pure read with a `try/catch` guard and costs only three
+  multiplications, an addition, and a square root.
+</Note>
+
+---
+
+## Global state keys
+
+The following properties are written to `window` (or `self`) by the N2AB Client and are available to all module code in `tools/modules.js`:
+
+| Key | Type | Description |
+|---|---|---|
+| `g.__n2abSnap` | `object` | Latest physics snapshot. Has `linVel: {x, y, z}` with velocity components in m/s. |
+| `g.__n2abKeys` | `object` | Map of `KeyboardEvent.code` strings → `boolean`. `true` while the key is held. |
+| `g.__n2abCheckpoints` | `Array<number>` | Checkpoint times (in seconds) accumulated during the current run. |
+| `g.__n2abSplitBest` | `Array<number>` | Best recorded checkpoint times, used for split delta calculation. |
+
+`g` is defined at the top of `modules.js` as:
+
+```javascript
+var g = typeof window !== "undefined" ? window : self;
+```
+
+---
+
+## Complete minimal example
+
+The following module uses every helper in this reference to display a live speed readout:
+
+```javascript
+__api.registerFeature("speedReadout", {
+  label: "Speed Readout",
+  description: "Current speed in km/h.",
+  category: "HUD",
+  onState: function(state) {
+    var s = state.speedReadout;
+    if (!s.active) { n2abStop("sr"); n2abRemove("n2ab-sr"); return; }
+    var el = n2abOverlay("n2ab-sr", "top:14px;right:14px;");
+    n2abLoop("sr", function() {
+      el.textContent = (n2abSpeed() * 3.6).toFixed(1) + " km/h";
+    });
+  },
+});
+```
+
+<Steps>
+  <Step title="Guard on active">
+    The first thing `onState` does is check `s.active`. If the module is off,
+    `n2abStop` cancels the rAF loop and `n2abRemove` pulls the overlay out of
+    the DOM, then the function returns immediately.
+  </Step>
+  <Step title="Create the overlay">
+    `n2abOverlay` creates the `<div>` on the first call and returns the existing
+    one on subsequent calls — so this line is safe to re-execute every time
+    `onState` fires.
+  </Step>
+  <Step title="Start the loop">
+    `n2abLoop` is idempotent: once the loop named `"sr"` is running, calling
+    `n2abLoop("sr", …)` again does nothing. The frame callback updates
+    `el.textContent` with the latest speed reading each frame.
+  </Step>
+</Steps>

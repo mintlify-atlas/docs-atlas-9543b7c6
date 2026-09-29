@@ -1,0 +1,92 @@
+---
+title: "Built-in Modules: All Seven N2AB Client Overlays"
+sidebarTitle: "Overview"
+description: "N2AB Client ships with seven built-in modules across four categories: HUD, Render, Movement, and Network. Enable any from the panel."
+---
+
+N2AB Client extends PolyTrack with a set of built-in **modules** — lightweight, client-side overlays and panel utilities that surface telemetry, visual aids, and display customisation without touching physics, the leaderboard, or netcode. Every module is toggled from the floating N2AB panel, and its settings persist automatically in `localStorage` under the key `N2AB_SETTINGS` so your preferences survive page reloads and browser restarts.
+
+## Module categories
+
+Modules are grouped into four categories that appear as labelled sections inside the panel:
+
+| Category | Purpose |
+|---|---|
+| **HUD** | In-game readouts overlaid on the viewport while you race |
+| **Render** | Visual presentation utilities — overlays, HUD suppression, colour theming |
+| **Movement** | Extension point for custom modules that react to physics state |
+| **Network** | Extension point for custom modules that interact with race or lobby data |
+
+The current release ships **seven built-in modules** across the HUD and Render categories. Movement and Network have no built-in modules yet; they exist as named categories so custom module authors can slot their work into the right section of the panel. See the [Movement & Network](/modules/movement) page for details.
+
+## All seven built-in modules
+
+<CardGroup cols={2}>
+  <Card title="Performance Overlay" icon="gauge-high">
+    **perfOverlay · Render**
+
+    Compact corner readout showing live FPS, smoothed frame time in ms, and 1% low FPS over the last ~600 frames. Configurable to any of the four screen corners.
+  </Card>
+  <Card title="Speed Graph" icon="chart-line">
+    **speedGraph · HUD**
+
+    Rolling canvas trace of your speed in km/h. Configurable time window (3–30 s) and graph height (40–160 px). Positioned at the bottom centre of the screen.
+  </Card>
+  <Card title="Checkpoint Splits" icon="flag-checkered">
+    **splits · HUD**
+
+    Logs each checkpoint time and shows the delta against your personal best run. Auto-resets when a new run begins. Positioned at the right-centre edge.
+  </Card>
+  <Card title="Input Display" icon="keyboard">
+    **inputDisplay · HUD**
+
+    Live WASD / arrow-key grid that highlights active keys in red. Scale is adjustable from 60 % to 200 %. Positioned at the bottom right.
+  </Card>
+  <Card title="Clean Screen" icon="eye-slash">
+    **cleanScreen · Render**
+
+    Hides native game HUD elements (speedometer, checkpoint UI, toolbar, hints, player list, and optionally the timer) for clean screenshots and video capture.
+  </Card>
+  <Card title="Session Stats" icon="chart-bar">
+    **sessionStats · HUD**
+
+    Tracks top speed, average speed, and total distance for the session. Optional per-run reset triggers when speed drops below 0.5 km/h. Positioned at the top centre.
+  </Card>
+  <Card title="Panel Theme" icon="palette">
+    **theme · Render**
+
+    Recolours the N2AB panel and all overlays by overriding the `--n2ab-red` CSS custom-property family. Hue (0–360°) and surface darkness (0–100) are independently adjustable.
+  </Card>
+</CardGroup>
+
+## Toggling and configuring modules
+
+<Steps>
+  <Step title="Open the N2AB panel">
+    Click the N2AB Client button that appears in the PolyTrack toolbar, or use the configured keyboard shortcut. The panel lists all modules grouped by category.
+  </Step>
+  <Step title="Enable a module">
+    Click the toggle switch next to a module's name. Modules with `mode: "toggle"` (e.g. Clean Screen) require an explicit second click to disable; all others deactivate the moment you flip the switch back off.
+  </Step>
+  <Step title="Adjust settings">
+    Expand a module row to reveal its settings sliders and checkboxes. Changes apply instantly — the overlay re-renders on the next animation frame.
+  </Step>
+  <Step title="Settings are persisted automatically">
+    Every change is written to `localStorage` under `N2AB_SETTINGS`. No save button is needed. To reset a module to defaults, remove its entry from that key or use the **Reset** button in the panel header.
+  </Step>
+</Steps>
+
+<Note>
+  All built-in modules are **purely presentational**. They read from snapshot globals such as `g.__n2abSnap` and `g.__n2abKeys`, but they never write physics state, alter race timing, or communicate with the server.
+</Note>
+
+## Explore by category
+
+<CardGroup cols={2}>
+  <Card title="HUD Modules" icon="display" href="/modules/hud">
+    Speed Graph, Checkpoint Splits, Input Display, and Session Stats — four overlays that surface live race telemetry.
+  </Card>
+  <Card title="Render Modules" icon="wand-magic-sparkles" href="/modules/render">
+    Performance Overlay, Clean Screen, and Panel Theme — three utilities for display quality, capture, and visual customisation.
+  </Card>
+</CardGroup>

@@ -1,0 +1,237 @@
+---
+title: "Module State and Settings API Reference"
+sidebarTitle: "State & Settings"
+description: "How N2AB Client constructs the state object passed to onState, and the full specification for range, bool, and text setting field types."
+---
+
+Every time a module is toggled or one of its settings changes, N2AB Client rebuilds a plain `state` object and passes it to the module's `onState(state)` callback. Understanding the shape of that object — and the precise field contract for each setting type — is essential for writing correct, defensive module code.
+
+## The state object
+
+`state` is a plain JavaScript object. Each registered module has a key on it matching the `name` passed to [`__api.registerFeature`](/api/register-feature). Accessing your module's slice is always:
+
+```javascript
+onState: function(state) {
+  var s = state.myModule;  // swap "myModule" for your feature's name
+  // s.active, s.settingKey, …
+}
+```
+
+<ParamField path="state[name].active" type="boolean">
+  `true` when the module is enabled in the panel, `false` when disabled.
+  Always check this first: if `!s.active`, clean up your overlay and return
+  before doing any work.
+</ParamField>
+
+<ParamField path="state[name].<settingKey>" type="number | boolean | string">
+  One property per declared setting, named by its key in the `settings` map.
+  The JavaScript type depends on the setting's `type` field — see the
+  per-type specifications below. All keys are present even when the module is
+  inactive; guard only on `active`, not on the individual setting values.
+</ParamField>
+
+<Note>
+  `onState` receives the **full** state object for all modules, not just your
+  own slice. You may read other modules' state if you need to coordinate
+  behaviour, but you should never mutate the object.
+</Note>
+
+## Setting field types
+
+Settings are declared inside the `settings` map of the feature descriptor. Each
+key in that map is a setting descriptor object with a mandatory `type` field
+that selects one of three shapes: `"range"`, `"bool"`, or `"text"`.
+
+---
+
+### range
+
+A numeric slider. The panel renders it as a draggable range input with labelled
+min/max endpoints.
+
+<ParamField body="type" type='"range"' required>
+  Must be the string `"range"`.
+</ParamField>
+
+<ParamField body="label" type="string" required>
+  Human-readable label shown next to the slider in the panel.
+</ParamField>
+
+<ParamField body="min" type="number" required>
+  Minimum numeric value for the slider.
+</ParamField>
+
+<ParamField body="max" type="number" required>
+  Maximum numeric value for the slider.
+</ParamField>
+
+<ParamField body="step" type="number" required>
+  Increment between valid positions on the slider. A step of `1` produces
+  integer values; `0.1` allows one decimal place.
+</ParamField>
+
+<ParamField body="default" type="number" required>
+  Value used on first load before the user has changed anything, and the value
+  restored when settings are reset.
+</ParamField>
+
+The value in `state[name].<key>` is a **number**, but because settings are
+round-tripped through JSON and localStorage it is safer to cast explicitly:
+
+```javascript
+var h = Number(s.height) || 70;
+```
+
+This is the exact pattern used in the built-in `speedGraph` module:
+
+```javascript
+var w = 320, h = Number(s.height) || 70;
+cv.width = w * 2; cv.height = h * 2;
+```
+
+**Declaration example:**
+
+```javascript
+settings: {
+  height: { type: "range", label: "Height (px)", min: 40, max: 160, step: 10, default: 70 },
+  seconds: { type: "range", label: "Window (s)",  min: 3,  max: 30,  step: 1,  default: 10 },
+}
+```
+
+---
+
+### bool
+
+A boolean toggle. The panel renders it as a checkbox or switch.
+
+<ParamField body="type" type='"bool"' required>
+  Must be the string `"bool"`.
+</ParamField>
+
+<ParamField body="label" type="string" required>
+  Human-readable label shown next to the toggle in the panel.
+</ParamField>
+
+<ParamField body="default" type="boolean" required>
+  Initial value: `true` or `false`.
+</ParamField>
+
+The value in `state[name].<key>` is a **boolean** and can be used directly in
+conditionals:
+
+```javascript
+if (s.showFrameTime) out += "\nms   " + n2abPerf.ms.toFixed(1).padStart(5, " ");
+if (s.showLows && n2abPerf.p1.length > 30) { /* … */ }
+```
+
+**Declaration example:**
+
+```javascript
+settings: {
+  showFrameTime: { type: "bool", label: "Show frame time", default: true  },
+  showLows:      { type: "bool", label: "Show 1% lows",    default: true  },
+  keepTimer:     { type: "bool", label: "Keep timer visible", default: false },
+}
+```
+
+---
+
+### text
+
+A free-form string input. The panel renders it as a text field.
+
+<ParamField body="type" type='"text"' required>
+  Must be the string `"text"`.
+</ParamField>
+
+<ParamField body="label" type="string" required>
+  Human-readable label shown above or beside the input in the panel.
+</ParamField>
+
+<ParamField body="default" type="string" required>
+  Initial string value before the user has changed anything.
+</ParamField>
+
+<ParamField body="maxLength" type="number">
+  Optional. When provided, the panel enforces a character limit on the input
+  field. The stored value will never exceed this length.
+</ParamField>
+
+The value in `state[name].<key>` is a **string** and can be used directly:
+
+```javascript
+el.textContent = (s.show ? s.prefix + "  " : "") + n2abSpeed().toFixed(1);
+```
+
+**Declaration example:**
+
+```javascript
+settings: {
+  prefix:  { type: "text", label: "Prefix",    default: "VAL" },
+  unit:    { type: "text", label: "Unit label", default: "km/h", maxLength: 8 },
+}
+```
+
+---
+
+## Persistence
+
+All setting values and the `active` state of every module are serialised to JSON
+and stored under the `N2AB_SETTINGS` key in `localStorage`. They are restored
+automatically on the next page load, so the user's configuration survives
+navigation and browser restarts.
+
+<Note>
+  Adding `transient: true` to your feature descriptor opts that module entirely
+  out of persistence. Neither `active` nor any setting values will be read from
+  or written to `localStorage` for that module. Every session starts from the
+  declared defaults.
+</Note>
+
+```javascript
+__api.registerFeature("ephemeral", {
+  label: "Ephemeral Module",
+  transient: true,          // nothing is ever saved for this module
+  settings: {
+    value: { type: "range", label: "Value", min: 0, max: 100, step: 1, default: 50 },
+  },
+  onState: function(state) { /* … */ },
+});
+```
+
+## Corner-position pattern
+
+A common idiom in the built-in modules is to use a `range` setting with `min: 1, max: 4` to let the user pick which screen corner an overlay occupies. The `perfOverlay` module maps this to CSS position strings:
+
+```javascript
+settings: {
+  corner: { type: "range", label: "Corner (1-4)", min: 1, max: 4, step: 1, default: 1 },
+},
+onState: function(state) {
+  var s = state.perfOverlay || {};
+  if (!s.active) { n2abStop("perf"); n2abRemove("n2ab-perf"); return; }
+
+  var spots = {
+    1: "top:14px;left:14px;",
+    2: "top:14px;right:14px;",
+    3: "bottom:14px;left:14px;",
+    4: "bottom:14px;right:14px;",
+  };
+  var el = n2abOverlay("n2ab-perf", spots[s.corner] || spots[1]);
+  // then clear stale position properties and re-apply:
+  el.style.top = el.style.bottom = el.style.left = el.style.right = "";
+  var pos = (spots[s.corner] || spots[1]).split(";");
+  for (var i = 0; i < pos.length; i++) {
+    var kv = pos[i].split(":");
+    if (kv.length === 2) el.style[kv[0]] = kv[1];
+  }
+  // …
+}
+```
+
+<Tip>
+  Always fall back to a safe default when reading a `range` value that controls
+  DOM layout — `spots[s.corner] || spots[1]` — because a corrupt or missing
+  localStorage entry will deliver `undefined`, which would otherwise silently
+  break positioning.
+</Tip>

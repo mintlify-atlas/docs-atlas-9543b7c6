@@ -1,0 +1,177 @@
+---
+title: "registerFeature — Register a Module in the N2AB Panel"
+sidebarTitle: "registerFeature"
+description: "__api.registerFeature(name, descriptor) adds a new toggleable module to the N2AB Client panel. Accepts label, category, settings, onState, and onToggle."
+---
+
+`__api.registerFeature` is the single entry-point for adding modules to the N2AB Client panel. Every built-in module — Performance, Speed Graph, Splits, Input Display, and the rest — is registered through the same call, so custom modules you add in `tools/modules.js` are first-class citizens of the panel with full settings persistence, toggle state, and lifecycle callbacks.
+
+## Signature
+
+```javascript
+__api.registerFeature(name: string, descriptor: FeatureDescriptor): void
+```
+
+<ParamField path="name" type="string" required>
+  Unique internal identifier for the module. This string is used as the key on
+  the `state` object passed to `onState` — `state[name]` always holds the live
+  state for this module. It must not collide with any built-in module name.
+</ParamField>
+
+## FeatureDescriptor fields
+
+<ParamField body="label" type="string" required>
+  Display name shown as the heading row for this module inside the N2AB panel.
+  Keep it short — one to three words reads best at the panel's default font size.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Subtitle rendered beneath the label in the panel. Use it to communicate what
+  the module does at a glance, for example `"FPS, frame time and 1% lows in a
+  compact corner readout."`.
+</ParamField>
+
+<ParamField body="category" type="string">
+  The panel group this module appears in. Must be one of the four built-in
+  category strings:
+
+  | Value | Modules that use it |
+  |---|---|
+  | `Movement` | Physics-adjacent helpers |
+  | `HUD` | Overlays and readouts |
+  | `Network` | Latency, sync indicators |
+  | `Render` | Visual and display tweaks |
+
+  Modules with an unrecognised category still register but may be hidden in the
+  panel UI.
+</ParamField>
+
+<ParamField body="toggleable" type="boolean" default="true">
+  When `false`, the module cannot be switched on or off by the user and is
+  always active after the client starts. Defaults to `true` for all modules that
+  do not specify this field.
+</ParamField>
+
+<ParamField body="mode" type="string">
+  Controls how the toggle behaves. One of:
+
+  - `"toggle"` — a standard on/off latch (default for most modules)
+  - `"hold"` — active only while the user holds the bound key
+  - `"momentary"` — fires once per key press then immediately deactivates
+</ParamField>
+
+<ParamField body="transient" type="boolean">
+  When `true`, neither the enabled state nor any setting values for this module
+  are written to `localStorage`. Every page load starts the module from its
+  declared defaults. Useful for modules that should not influence a shared
+  profile or that change meaning between sessions.
+</ParamField>
+
+<ParamField body="settings" type="object">
+  A plain object mapping setting keys to setting descriptors. Each key becomes a
+  property on `state[name]` with the current value of that setting. The three
+  supported descriptor types are `"range"`, `"bool"`, and `"text"` — see the
+  [State & Settings](/api/state-and-settings) reference for the full field
+  specification for each type.
+
+  ```javascript
+  settings: {
+    corner: { type: "range", label: "Corner (1-4)", min: 1, max: 4, step: 1, default: 1 },
+    show:   { type: "bool",  label: "Show label",               default: true },
+    prefix: { type: "text",  label: "Prefix",                   default: "VAL" },
+  }
+  ```
+</ParamField>
+
+<ParamField body="onState" type="function">
+  ```
+  onState(state: object): void
+  ```
+
+  Called every time any state changes — a toggle, a setting slider move, or the
+  initial load. Receives the full `state` object; read `state[name]` to get this
+  module's slice. This is the primary hook: create or destroy your overlay here,
+  start or stop your rAF loop, or mutate the DOM.
+
+  <Note>
+    `onState` is called once immediately when the module first registers, so
+    your overlay setup and teardown code runs on page load without needing a
+    separate initialisation path.
+  </Note>
+</ParamField>
+
+<ParamField body="onToggle" type="function">
+  ```
+  onToggle(active: boolean, state: object): void
+  ```
+
+  Called specifically when the module's enabled state flips. `active` is the
+  new boolean value; `state` is the same full state object as in `onState`. Use
+  this for one-shot side-effects that should only fire on a real toggle event
+  rather than on every settings change.
+</ParamField>
+
+## State object shape
+
+When `onState` fires, `state[name]` always has the following shape:
+
+```javascript
+{
+  active: boolean,      // true when the module is enabled in the panel
+  settingKey1: value,   // current value for each declared setting
+  settingKey2: value,
+  // …
+}
+```
+
+For a module named `"myModule"` with a `corner` range setting and a `show` bool setting, a typical state slice looks like:
+
+```javascript
+state.myModule
+// → { active: true, corner: 2, show: false }
+```
+
+## Full example
+
+The example below registers a module that combines all three setting types, uses
+the [overlay helpers](/api/overlay-helpers) for DOM management, and reads its
+own state slice correctly inside `onState`.
+
+```javascript
+__api.registerFeature("myModule", {
+  label: "My Module",
+  description: "A custom overlay.",
+  category: "HUD",
+  settings: {
+    corner: { type: "range", label: "Corner (1-4)", min: 1, max: 4, step: 1, default: 1 },
+    show:   { type: "bool",  label: "Show label",               default: true  },
+    prefix: { type: "text",  label: "Prefix",                   default: "VAL" },
+  },
+  onState: function(state) {
+    var s = state.myModule;
+    if (!s.active) { n2abRemove("my-overlay"); return; }
+    var el = n2abOverlay("my-overlay", "top:14px;left:14px;");
+    el.textContent = (s.show ? s.prefix + "  " : "") + n2abSpeed().toFixed(1);
+  },
+});
+```
+
+<Tip>
+  The `name` argument doubles as the key on the `state` object **and** as the
+  identifier used internally to store settings. Choose a concise camelCase name
+  that will not clash with future built-in modules.
+</Tip>
+
+## Placement and build
+
+`tools/modules.js` is injected into the client bundle by `tools/build-n2ab-client.js` immediately after the built-in modules finish registering. Because `__api` is already fully initialised at that point, every `registerFeature` call in `modules.js` is guaranteed to succeed. Append new modules to the bottom of `modules.js`, then rebuild:
+
+```bash
+node tools/build-n2ab-client.js
+```
+
+<Warning>
+  Do not call `__api.registerFeature` from arbitrary script tags or userscripts
+  injected before the client bundle loads — `__api` will not exist yet. Always
+  append to `tools/modules.js` and let the build tool handle injection order.
+</Warning>

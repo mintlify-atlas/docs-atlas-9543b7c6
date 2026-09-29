@@ -1,47 +1,136 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with N2AB Client in Minutes"
+sidebarTitle: "Quickstart"
+description: "Launch N2AB Client in your browser or Electron desktop app, open the panel, and register your first custom module in under five minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+N2AB Client runs wherever PolyTrack runs. The fastest path is a direct browser visit — no installation, no build step. If you prefer a native desktop window with auto-updating, the Electron app takes only a few extra minutes to set up. Either way, the panel, overlays, and module registry work identically once the game loads.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+## Step 1 — Launch the game
 
-## Prerequisites
+Choose the option that suits your setup:
 
-Before you begin, you must have:
+<CodeGroup>
+```text Browser (no setup)
+Open https://polytrack.skyhost.fun in any modern browser.
+N2AB Client loads automatically alongside the game.
+```
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+```bash Electron desktop app
+# After cloning and installing dependencies (see Installation):
+npm run electron
+```
+</CodeGroup>
 
-## Get started
+The Electron app opens full-screen. The first launch checks for an update, shows a splash screen with a progress bar, then loads the game automatically.
+
+## Step 2 — Open the client panel
+
+Once the race track is visible, open the N2AB Client panel. The panel toggle button appears at the edge of the screen — click it, or use the keyboard shortcut shown on the button, to expand the panel. All seven built-in modules are listed here, grouped by category (Movement, HUD, Network, Render). Toggle any module on to see its overlay appear immediately.
+
+<Tip>
+  Press **F11** (or **Alt + Enter** on Windows/Linux) in the Electron app to
+  toggle full-screen mode at any time without leaving the game.
+</Tip>
+
+## Step 3 — Write a custom module
+
+All modules are registered through `__api.registerFeature`. Open `tools/modules.js` and append a new entry. The example below creates a minimal overlay that shows a live odometer in the top-left corner using the same helper utilities the built-in modules use:
+
+```js tools/modules.js
+__api.registerFeature("odometer", {
+  label: "Odometer",
+  description: "Running total of metres driven in this session.",
+  category: "HUD",
+  settings: {
+    resetOnRun: { type: "bool", label: "Reset each run", default: false },
+  },
+  onState: function (state) {
+    var s = state.odometer || {};
+    if (!s.active) { n2abStop("odo"); n2abRemove("n2ab-odo"); return; }
+
+    var el = n2abOverlay("n2ab-odo", "top:14px;left:14px;");
+    var dist = 0, last = performance.now();
+
+    n2abLoop("odo", function () {
+      var now = performance.now();
+      var v = n2abSpeed();               // m/s from the game's physics snapshot
+      dist += v * ((now - last) / 1000);
+      last = now;
+      if (s.resetOnRun && v < 0.5) dist = 0;
+      el.textContent = "ODO  " + dist.toFixed(0).padStart(6, " ") + " m";
+    });
+  },
+});
+```
+
+<Note>
+  `n2abOverlay`, `n2abRemove`, `n2abLoop`, `n2abStop`, and `n2abSpeed` are
+  utility functions defined at the top of `tools/modules.js`. They are
+  available to all modules in the same file because they are injected together
+  into the same IIFE.
+</Note>
+
+The full `registerFeature` signature supports these fields:
+
+| Field        | Type / values                              | Notes                                      |
+|--------------|--------------------------------------------|--------------------------------------------|
+| `label`      | `string`                                   | Displayed name in the panel                |
+| `description`| `string`                                   | Shown below the name                       |
+| `category`   | `"Movement"` `"HUD"` `"Network"` `"Render"`| Determines panel group                     |
+| `toggleable` | `boolean`                                  | Whether the panel shows an on/off toggle   |
+| `mode`       | `"toggle"` `"hold"` `"momentary"`          | Activation mode                            |
+| `transient`  | `boolean`                                  | `true` = state is never written to storage |
+| `settings`   | `Record<string, SettingDef>`               | Per-setting schema (see below)             |
+| `onState`    | `function(state)`                          | Called on every state change               |
+| `onToggle`   | `function(active, state)`                  | Called when the toggle flips               |
+
+Settings types are `"range"`, `"bool"`, and `"text"`. Each setting definition carries `type`, `label`, and `default`, with `min`, `max`, `step` for `range` and `maxLength` for `text`.
+
+## Step 4 — Run the build tool
+
+After saving `tools/modules.js`, apply the change to the bundle:
+
+<CodeGroup>
+```bash Apply changes
+node tools/build-n2ab-client.js
+```
+
+```bash Verify only (no file written)
+node tools/build-n2ab-client.js --check
+```
+</CodeGroup>
+
+A successful run prints something like:
+
+```text
+strings rebranded : 312
+checksum rotations: 348 (must be 348)
+brand leftovers   : 0
+stylesheet entry  : #1234
+
+wrote n2ab_client.bundle.js
+```
+
+The tool fails loudly if the rotation count is not 348, if any upstream brand token survives, or if the output is not valid JavaScript — so a clean exit is a strong signal that the bundle is correct.
+
+## Step 5 — Reload and verify
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
-
-    ```bash
-    npm install your-package
-    ```
+  <Step title="Refresh the browser tab (or relaunch the Electron app)">
+    The updated `n2ab_client.bundle.js` is loaded fresh on every page load.
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
-
-    ```bash
-    your-cli init
-    ```
+  <Step title="Open the panel">
+    Your new module appears in the list under the category you declared.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
-
-    ```bash
-    your-cli start
-    ```
+  <Step title="Toggle the module on">
+    The overlay appears immediately. Adjust any settings you declared — changes
+    take effect in real time and are saved to `localStorage` under
+    `N2AB_SETTINGS`.
   </Step>
 </Steps>
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+  Run `node tools/build-n2ab-client.js --check` in CI or as a pre-commit hook
+  to catch brand leakage and syntax errors before they reach the browser.
 </Tip>

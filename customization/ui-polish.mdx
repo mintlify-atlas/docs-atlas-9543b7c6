@@ -1,0 +1,307 @@
+---
+title: "Styling the N2AB Panel with ui-polish.css"
+sidebarTitle: "UI Polish"
+description: "Customize the N2AB Client panel's appearance using ui-polish.css, which is injected into the shadow DOM and defines design tokens for surfaces, typography, and inputs."
+---
+
+The N2AB Client panel is rendered inside a shadow DOM, which means its styles are completely isolated from the rest of the game's page. `tools/ui-polish.css` is a plain CSS file that the build tool appends to the panel's internal stylesheet on every build. Because it targets the shadow root's `:host` and the component class names inside it, every rule here is scoped automatically — nothing you write in this file can leak into the game UI. This page explains the design token system, documents each section of the file, and shows how to add your own overrides before running the build.
+
+## How the build injects the CSS
+
+When you run `node tools/build-n2ab-client.js`, the build tool locates the panel's shadow-DOM stylesheet entry in the obfuscated string table, strips any previously injected polish block (identified by a `/* n2ab-ui-polish */` marker), and appends the minified content of `ui-polish.css` in its place. The injection is idempotent: running the build multiple times always produces the same result, and a stale polish block is never left behind.
+
+<Note>
+  The CSS is minified (comments stripped, whitespace collapsed) before it is embedded into the string table. The rules you write in `ui-polish.css` are preserved exactly — only formatting is removed.
+</Note>
+
+---
+
+## Design tokens
+
+All visual constants are declared as CSS custom properties on `:host`, which makes them available to every rule inside the shadow DOM. The full token set defined in `ui-polish.css` is:
+
+```css
+:host {
+  --n2-surface:      #101014;
+  --n2-surface-2:    #16161c;
+  --n2-line:         rgba(255, 255, 255, 0.08);
+  --n2-line-strong:  rgba(255, 255, 255, 0.14);
+  --n2-ink:          #edeef2;
+  --n2-ink-dim:      #9a9aa6;
+  --n2-radius:       14px;
+  --n2-ease:         cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="--n2-surface" icon="square">
+    `#101014` — the darkest background, used for the main panel body.
+  </Card>
+  <Card title="--n2-surface-2" icon="square">
+    `#16161c` — a slightly lighter surface for the drag handle header and inset areas.
+  </Card>
+  <Card title="--n2-line" icon="minus">
+    `rgba(255,255,255,0.08)` — a very subtle white border for panel outlines and row dividers.
+  </Card>
+  <Card title="--n2-line-strong" icon="minus">
+    `rgba(255,255,255,0.14)` — a stronger variant for borders that need slightly more contrast.
+  </Card>
+  <Card title="--n2-ink" icon="text">
+    `#edeef2` — primary text colour. Used for module labels and overlay readouts.
+  </Card>
+  <Card title="--n2-ink-dim" icon="text">
+    `#9a9aa6` — secondary text colour. Used for section headings, descriptions, and slider values.
+  </Card>
+  <Card title="--n2-radius" icon="circle">
+    `14px` — the base border-radius. Corner radii throughout the panel are derived from this value.
+  </Card>
+  <Card title="--n2-ease" icon="wave-sine">
+    `cubic-bezier(0.32, 0.72, 0.28, 1)` — the easing curve applied to all transitions and the panel pop-in animation.
+  </Card>
+</CardGroup>
+
+---
+
+## CSS sections
+
+The file is divided into eight named sections, each with a focused responsibility.
+
+### Panels
+
+The `.n2-panel-glow` class applies a layered `box-shadow` — a deep drop shadow plus a 1-pixel ring using `--n2-line` — giving the panel depth without a harsh neon outline. The background and border utilities (`.bg-n2-panel\/95`, `.border-n2-panel-border\/30`) are patched to use the surface tokens instead of the original hard-coded colours.
+
+```css
+.n2-panel-glow {
+  box-shadow:
+    0 24px 64px -16px rgba(0, 0, 0, 0.72),
+    0 0 0 1px var(--n2-line);
+}
+
+.bg-n2-panel\/95 {
+  background-color: color-mix(in srgb, var(--n2-surface) 94%, transparent);
+}
+
+.border-n2-panel-border\/30 {
+  border-color: var(--n2-line);
+}
+```
+
+Border-radius utilities are also normalised to `--n2-radius`:
+
+```css
+.rounded-xl  { border-radius: var(--n2-radius); }
+.rounded-2xl { border-radius: calc(var(--n2-radius) + 4px); }
+```
+
+### Header
+
+The drag handle header (`.n2-drag-handle`) replaces the original gradient with a flat `--n2-surface-2` background and a single bottom border in `--n2-line`. The title text gets a tighter letter spacing and `font-weight: 600`:
+
+```css
+.n2-drag-handle {
+  background-image: none;
+  background-color: color-mix(in srgb, var(--n2-surface-2) 96%, transparent);
+  border-bottom: 1px solid var(--n2-line);
+}
+
+.n2-drag-handle .text-\[17px\] {
+  letter-spacing: 0.01em;
+  font-weight: 600;
+}
+```
+
+### Rows
+
+Module rows (`.group`) are given a `10px` border radius, horizontal padding, and a smooth background-colour transition on hover. The hover state is a very subtle white tint rather than a hard highlight:
+
+```css
+.group {
+  border-radius: 10px;
+  margin: 0 8px;
+  padding-left: 12px;
+  padding-right: 12px;
+  transition:
+    background-color 140ms var(--n2-ease),
+    color 140ms var(--n2-ease);
+}
+
+.group:hover { background-color: rgba(255, 255, 255, 0.05); }
+```
+
+### Section labels
+
+Category headings use `--n2-ink-dim` at `11px` with tighter letter-spacing than the default, bringing them closer to a proper type hierarchy:
+
+```css
+.uppercase.tracking-\[0\.25em\] {
+  letter-spacing: 0.18em;
+  font-size: 11px;
+  color: var(--n2-ink-dim);
+}
+```
+
+### Inputs
+
+All `input`, `textarea`, and `select` elements get a consistent `9px` border-radius and smooth transitions for border colour, background, and box-shadow. Focus states use a low-opacity red glow that matches the accent colour without being distracting:
+
+```css
+input, textarea, select {
+  border-radius: 9px;
+  transition:
+    border-color 140ms var(--n2-ease),
+    background-color 140ms var(--n2-ease),
+    box-shadow 140ms var(--n2-ease);
+}
+
+input:focus,
+textarea:focus {
+  box-shadow: 0 0 0 3px rgba(255, 58, 58, 0.14);
+}
+```
+
+### Sliders
+
+Range sliders (`.n2-slider`) are thinned to a `4px` track. The thumb is shrunk to `13px`, the default scale-on-hover transform is removed, and a glow ring is used instead:
+
+```css
+input[type="range"].n2-slider { height: 4px; border-radius: 999px; }
+
+input[type="range"].n2-slider::-webkit-slider-thumb {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+  transition: box-shadow 140ms var(--n2-ease);
+}
+
+input[type="range"].n2-slider::-webkit-slider-thumb:hover {
+  transform: none;
+  box-shadow: 0 0 0 5px rgba(255, 58, 58, 0.16);
+}
+```
+
+### Scrollbar
+
+The panel's scrollable list (`.n2-scroll`) gets a slimmer `8px` scrollbar. The thumb uses a white tint with a transparent `2px` border to create visual breathing room from the track, and brightens slightly on hover:
+
+```css
+.n2-scroll::-webkit-scrollbar { width: 8px; }
+
+.n2-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.n2-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.26);
+  background-clip: content-box;
+}
+
+.n2-scroll { scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+```
+
+### Toggles and motion
+
+Toggle switches use `--n2-ease` for their background-colour transition. The pop-in animation is set to `160ms` with the same easing curve:
+
+```css
+.rounded-full.relative { transition: background-color 160ms var(--n2-ease); }
+
+.animate-n2-pop-in {
+  animation-duration: 160ms;
+  animation-timing-function: var(--n2-ease);
+}
+```
+
+---
+
+## Reduced motion
+
+A `@media (prefers-reduced-motion: reduce)` block at the end of the file disables the pop-in animation entirely and collapses all transition durations to `1ms`. This respects users who have enabled the OS-level reduced-motion preference:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  .animate-n2-pop-in { animation: none !important; }
+  * { transition-duration: 1ms !important; }
+}
+```
+
+<Note>
+  Do not remove or override this block. Any custom transitions you add will also be collapsed by this rule, which is the correct behaviour.
+</Note>
+
+---
+
+## Adding your own overrides
+
+To customise the panel's appearance, append your rules to the bottom of `ui-polish.css` — after all the existing sections but before the `@media (prefers-reduced-motion)` block (or after it, if your rules also define transitions that should respect motion preference). Then run the build to apply them:
+
+```css
+/* ---- your custom overrides ----------------------------------------- */
+
+/* Widen the panel */
+.n2-panel-glow {
+  min-width: 320px;
+}
+
+/* Override the accent token for a blue tint */
+:host {
+  --n2ab-red:      hsl(220, 100%, 62%);
+  --n2ab-red-hi:   hsl(220, 100%, 66%);
+  --n2ab-red-deep: hsl(220, 78%,  40%);
+  --n2ab-red-glow: hsla(220, 100%, 62%, 0.45);
+}
+
+/* Increase row padding */
+.group {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+```
+
+After saving `ui-polish.css`, re-run the build:
+
+```bash
+node tools/build-n2ab-client.js
+```
+
+The build strips the old polish block, re-embeds the updated CSS, and rewrites `n2ab_client.bundle.js`. Reload the game to see your changes.
+
+<Tip>
+  Use the `--check` flag while iterating on CSS to confirm the build is still valid without overwriting the bundle on every save:
+  ```bash
+  node tools/build-n2ab-client.js --check
+  ```
+  Only run the build without `--check` once you are satisfied with the result.
+</Tip>
+
+<Warning>
+  Avoid adding rules that target IDs or class names belonging to the game's own UI (outside the shadow root). `ui-polish.css` is scoped to the shadow DOM and those selectors will simply have no effect — but keeping the file focused on panel styles prevents confusion.
+</Warning>
+
+---
+
+## Full token reference
+
+```css
+:host {
+  /* Surfaces */
+  --n2-surface:     #101014;          /* main panel background            */
+  --n2-surface-2:   #16161c;          /* header / inset areas             */
+
+  /* Borders */
+  --n2-line:        rgba(255, 255, 255, 0.08);   /* subtle dividers       */
+  --n2-line-strong: rgba(255, 255, 255, 0.14);   /* stronger borders      */
+
+  /* Text */
+  --n2-ink:         #edeef2;          /* primary labels and readouts      */
+  --n2-ink-dim:     #9a9aa6;          /* section headings, descriptions   */
+
+  /* Shape */
+  --n2-radius:      14px;             /* base corner radius               */
+
+  /* Motion */
+  --n2-ease:        cubic-bezier(0.32, 0.72, 0.28, 1);  /* all transitions */
+}
+```

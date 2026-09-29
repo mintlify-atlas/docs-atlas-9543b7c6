@@ -1,7 +1,7 @@
 ---
-title: "Styling the N2AB Panel with ui-polish.css"
+title: "Customising the N2AB Client Panel with ui-polish.css"
 sidebarTitle: "UI Polish"
-description: "Customize the N2AB Client panel's appearance using ui-polish.css, which is injected into the shadow DOM and defines design tokens for surfaces, typography, and inputs."
+description: "Reskin the N2AB Client panel in ui-polish.css. Build injects it into the shadow DOM and scopes design tokens for surfaces, typography, radius, and easing."
 ---
 
 The N2AB Client panel is rendered inside a shadow DOM, which means its styles are completely isolated from the rest of the game's page. `tools/ui-polish.css` is a plain CSS file that the build tool appends to the panel's internal stylesheet on every build. Because it targets the shadow root's `:host` and the component class names inside it, every rule here is scoped automatically — nothing you write in this file can leak into the game UI. This page explains the design token system, documents each section of the file, and shows how to add your own overrides before running the build.

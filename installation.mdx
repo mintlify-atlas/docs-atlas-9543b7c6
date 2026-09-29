@@ -1,5 +1,5 @@
 ---
-title: "Installing N2AB Client — Browser and Desktop"
+title: "Install N2AB Client: Browser, Electron, and Android"
 sidebarTitle: "Installation"
 description: "Set up N2AB Client as a browser-based game mod or a standalone Electron desktop application. Covers prerequisites and build-from-source steps."
 ---
@@ -41,7 +41,7 @@ Visit **[https://polytrack.skyhost.fun](https://polytrack.skyhost.fun)** in any 
     ```bash
     npm run electron
     ```
-    The `preelectron` hook runs Webpack first (`TARGET=electron`) to produce the `dist/` directory, then Electron loads `dist/index.html`. The app opens full-screen with the N2AB splash screen while it checks for updates, then launches directly into the game.
+    The `preelectron` hook runs Webpack first (`TARGET=electron`) to produce the `dist/` directory, then Electron launches from that directory. The app opens full-screen, loads `n2ab_client.splash.html` while it checks for updates, then transitions to `index.html` once the check completes.
 
     <Note>
       On Linux, Electron defaults to the X11 backend unless `N2AB_WAYLAND=1` is
@@ -130,8 +130,8 @@ N2AB_MANIFEST=https://your-server.example.com/n2ab.json electron ./dist
 
 <Warning>
   When `--no-update` or `N2AB_NO_UPDATE=1` is active, the splash screen shows
-  "Update check skipped" and the build number is labelled **DEV**. Do not
-  distribute binaries built with this flag set.
+  "Update check skipped" and proceeds directly to the game. Do not distribute
+  binaries launched with this flag set.
 </Warning>
 
 ## Wayland (Linux)

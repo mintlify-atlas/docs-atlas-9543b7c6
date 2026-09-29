@@ -1,7 +1,7 @@
 ---
-title: "Built-in Modules: All Seven N2AB Client Overlays"
+title: "N2AB Client Modules: Seven Built-in Overlays Overview"
 sidebarTitle: "Overview"
-description: "N2AB Client ships with seven built-in modules across four categories: HUD, Render, Movement, and Network. Enable any from the panel."
+description: "N2AB Client ships with seven built-in modules across HUD and Render categories. Enable any from the panel — settings persist automatically."
 ---
 
 N2AB Client extends PolyTrack with a set of built-in **modules** — lightweight, client-side overlays and panel utilities that surface telemetry, visual aids, and display customisation without touching physics, the leaderboard, or netcode. Every module is toggled from the floating N2AB panel, and its settings persist automatically in `localStorage` under the key `N2AB_SETTINGS` so your preferences survive page reloads and browser restarts.
@@ -79,6 +79,17 @@ The current release ships **seven built-in modules** across the HUD and Render c
 <Note>
   All built-in modules are **purely presentational**. They read from snapshot globals such as `g.__n2abSnap` and `g.__n2abKeys`, but they never write physics state, alter race timing, or communicate with the server.
 </Note>
+
+## Global state keys
+
+All built-in modules read from four globals that the N2AB Client hook writes on every physics frame. Custom modules should treat these as **read-only**.
+
+| Global | Type | Description |
+|---|---|---|
+| `g.__n2abSnap` | `{ linVel: { x, y, z } }` | Physics snapshot written each tick. `linVel` is the vehicle's linear velocity in m/s along each axis. Pass it to `n2abSpeed()` to get scalar speed. |
+| `g.__n2abKeys` | `{ [code: string]: boolean }` | Maps every active `KeyboardEvent.code` to `true` while that key is held down. Used by Input Display to detect WASD and arrow keys. |
+| `g.__n2abCheckpoints` | `Array` | Array of checkpoint objects maintained by the client hook. The Splits module reads its `.length` to detect when a new run begins. |
+| `g.__n2abSplitBest` | `number[]` | Array of personal-best split times (seconds) indexed by checkpoint number. Written by the Splits module across runs; session-scoped (cleared on page reload). |
 
 ## Explore by category
 

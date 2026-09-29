@@ -1,6 +1,6 @@
 ---
 title: "registerFeature — Register a Module in the N2AB Panel"
-sidebarTitle: "registerFeature"
+sidebarTitle: "Register Feature"
 description: "__api.registerFeature(name, descriptor) adds a new toggleable module to the N2AB Client panel. Accepts label, category, settings, onState, and onToggle."
 ---
 
@@ -8,7 +8,7 @@ description: "__api.registerFeature(name, descriptor) adds a new toggleable modu
 
 ## Signature
 
-```javascript
+```text
 __api.registerFeature(name: string, descriptor: FeatureDescriptor): void
 ```
 
@@ -84,7 +84,7 @@ __api.registerFeature(name: string, descriptor: FeatureDescriptor): void
 </ParamField>
 
 <ParamField body="onState" type="function">
-  ```
+  ```text
   onState(state: object): void
   ```
 
@@ -101,7 +101,7 @@ __api.registerFeature(name: string, descriptor: FeatureDescriptor): void
 </ParamField>
 
 <ParamField body="onToggle" type="function">
-  ```
+  ```text
   onToggle(active: boolean, state: object): void
   ```
 
@@ -149,9 +149,11 @@ __api.registerFeature("myModule", {
   },
   onState: function(state) {
     var s = state.myModule;
-    if (!s.active) { n2abRemove("my-overlay"); return; }
+    if (!s.active) { n2abStop("mymod"); n2abRemove("my-overlay"); return; }
     var el = n2abOverlay("my-overlay", "top:14px;left:14px;");
-    el.textContent = (s.show ? s.prefix + "  " : "") + n2abSpeed().toFixed(1);
+    n2abLoop("mymod", function() {
+      el.textContent = (s.show ? s.prefix + "  " : "") + n2abSpeed().toFixed(1);
+    });
   },
 });
 ```

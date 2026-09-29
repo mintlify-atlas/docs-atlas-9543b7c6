@@ -1,7 +1,7 @@
 ---
-title: "Running N2AB Client as an Electron Desktop App"
+title: "N2AB Client Electron App: Build, Run, and Configure"
 sidebarTitle: "Electron App"
-description: "Package and run N2AB Client as a standalone Electron desktop application with auto-update, fullscreen toggle, single-instance lock, and screen capture support."
+description: "Package and run N2AB Client as a standalone Electron app with auto-update, fullscreen toggle, single-instance lock, IPC bridge, and screen capture."
 ---
 
 The Electron wrapper in `electron/main.js` loads the N2AB Client game inside a `BrowserWindow` and adds a thin layer of desktop-specific features: single-instance enforcement, a fullscreen toggle, locked navigation, an origin header override that satisfies the game server, screen-capture support for the replay system, and a built-in auto-updater that patches `app.asar` in place before launching. A preload script exposes a narrow IPC bridge to the renderer so the game page can call these features without `nodeIntegration`.

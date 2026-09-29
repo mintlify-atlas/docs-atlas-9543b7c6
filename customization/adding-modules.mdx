@@ -1,5 +1,5 @@
 ---
-title: "Adding Custom Modules to the N2AB Client Panel"
+title: "Adding Custom Feature Modules to the N2AB Client Panel"
 sidebarTitle: "Adding Modules"
 description: "Extend N2AB Client with custom modules by appending a registerFeature call to tools/modules.js and running the build tool to patch the bundle."
 ---
@@ -104,6 +104,24 @@ __api.registerFeature("myModule", {
 
 <ParamField path="transient" type="boolean" default="false">
   When `true`, the module's state is never written to `localStorage`. The module starts fresh on every page load. Useful for overlays that should not persist across sessions.
+</ParamField>
+
+### settings
+
+<ParamField path="settings" type="object">
+  A plain key-value map of setting descriptors. Each key becomes a named property on the module's state slice. The panel renders the appropriate widget (`range` slider, `bool` toggle, or `text` input) for each entry automatically. See the [Settings API](/customization/settings-api) for the full field reference.
+</ParamField>
+
+### onState
+
+<ParamField path="onState" type="function">
+  `onState(state)` — called on every state change, including the initial mount and every time any setting value changes. Your module's current slice is at `state[name]` and always contains `active` plus one property per declared setting.
+</ParamField>
+
+### onToggle
+
+<ParamField path="onToggle" type="function">
+  `onToggle(active, state)` — called only when the `active` flag transitions between `true` and `false`. Use this for one-shot side-effects (injecting or removing a `<style>` tag, for example). `onState` is always called in addition to `onToggle`, so logic common to both callbacks belongs in `onState`.
 </ParamField>
 
 ---

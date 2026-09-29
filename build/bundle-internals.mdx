@@ -1,7 +1,7 @@
 ---
-title: "Understanding the N2AB Client Bundle Internals"
+title: "N2AB Client Bundle Internals: Strings and Rotation"
 sidebarTitle: "Bundle Internals"
-description: "How the N2AB Client obfuscated bundle encodes strings, performs rotation-based checksumming, and how the build tool safely patches it without breaking the runtime."
+description: "How the N2AB Client bundle encodes strings with a custom base64 alphabet, uses rotation-based checksumming, and how the build tool patches it safely."
 ---
 
 The N2AB Client is distributed as a pre-built, obfuscated JavaScript bundle (`n2ab_client.bundle.js`). There are no upstream TypeScript or ES module sources in this repository — the bundle is a closed artifact. All customisations, from rebranding to CSS injection to extra module registration, are applied by `tools/build-n2ab-client.js` as a repeatable transform against the binary artifact. Understanding how the bundle stores and loads strings is essential for anyone modifying the build tool or auditing why certain entries must never be changed.
@@ -41,7 +41,7 @@ Each element of the array is encoded with a custom base64-ish alphabet. The code
 
 The codec uses the following 65-character alphabet (standard base64 plus `=` as a pad character, but in a different character class order than RFC 4648):
 
-```
+```text
 abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/=
 ```
 
@@ -139,7 +139,7 @@ After all string-table entries are processed, `rebrandText()` is applied a secon
 
 The nine pinned pre-rotation indices (raw hex, each minus `0x14d` for the zero-based offset):
 
-```
+```text
 0x60b  0x4ae  0x1176  0xcd7  0x53b
 0x8a2  0x1d4  0x5d0   0x5f7
 ```

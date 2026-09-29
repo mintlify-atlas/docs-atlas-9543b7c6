@@ -1,7 +1,7 @@
 ---
-title: "Render Modules: Performance Overlay, Clean Screen, Panel Theme"
+title: "Render Modules: Performance, Clean Screen, and Theme"
 sidebarTitle: "Render Modules"
-description: "Three Render-category modules in N2AB Client: Performance Overlay for FPS and frame time, Clean Screen for cinematic capture, and Panel Theme for custom accent colors."
+description: "Three N2AB Client Render modules: Performance Overlay for FPS readouts, Clean Screen for cinematic capture, and Panel Theme for custom accent colours."
 ---
 
 N2AB Client ships three Render-category modules that handle the visual layer of the client experience. Unlike HUD modules — which overlay race telemetry — Render modules affect how the page itself is displayed: how the performance of the renderer is reported, which native game elements are visible, and what colour palette the panel and overlays use. None of these modules touch physics state or network communication.
@@ -133,6 +133,8 @@ Using `opacity: 0` (rather than `display: none`) means the native game's layout 
 ## Panel Theme (`theme`)
 
 Panel Theme overrides the N2AB Client's CSS custom properties to recolour the panel and all overlays in real time. Adjusting the hue slider shifts the entire accent colour family to any point in the spectrum; the dim slider darkens the computed lightness values to suit different ambient lighting conditions or personal preference.
+
+The theme module is registered with `toggleable: true`, which means the panel always shows the toggle switch for this module regardless of whether any other activation condition is met. Disabling the toggle removes the injected `<style>` element immediately, restoring all default N2AB colours.
 
 The module writes a `<style>` element into `document.head` containing a `:root {}` block that overrides four custom properties used throughout the client:
 

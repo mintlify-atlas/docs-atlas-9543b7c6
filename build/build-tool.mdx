@@ -72,7 +72,7 @@ Nine entries feed the rotation checksum. Modifying any of them causes the runtim
 
 The raw hex offsets from source (each minus `BASE = 0x14d` to get the zero-based array index):
 
-```
+```text
 0x60b, 0x4ae, 0x1176, 0xcd7, 0x53b, 0x8a2, 0x1d4, 0x5d0, 0x5f7
 ```
 
@@ -96,17 +96,17 @@ The `rebrandText()` function applies a deterministic ordered chain of string rep
 
 | Input token | Replacement | Notes |
 |---|---|---|
-| `PolyTraqqq Cheat Client` | `N2AB Client` | Matched before the generic `PolyTraqqq` rule |
-| `PolyTraqqq` | `N2AB Client` | Display name |
-| `polytraqqq` | `n2abclient` | Lowercase identifier |
-| `POLYFLY_` | `N2AB_` | Uppercase constant prefix |
-| `POLYFLY` | `N2AB` | Uppercase constant |
-| `PTQ_` | `N2AB_` | Uppercase constant prefix |
-| `__polyFlyCmd` | `__n2abCmd` | Internal command identifier |
-| `__polyflyWasm` | `__n2abWasm` | Wasm bridge identifier |
+| `__polyFlyCmd` | `__n2abCmd` | Internal command identifier — matched before shorter `__polyfly` rule |
+| `__polyflyWasm` | `__n2abWasm` | Wasm bridge identifier — matched before shorter `__polyfly` rule |
 | `__polyfly` | `__n2ab` | Generic internal prefix |
 | `__ptq` | `__n2ab` | Alternative internal prefix |
 | `__pf` | `__n2ab` | Short internal prefix |
+| `POLYFLY_` | `N2AB_` | Uppercase constant prefix |
+| `POLYFLY` | `N2AB` | Uppercase constant |
+| `PTQ_` | `N2AB_` | Uppercase constant prefix |
+| `PolyTraqqq Cheat Client` | `N2AB Client` | Matched before the shorter `PolyTraqqq` rule |
+| `PolyTraqqq` | `N2AB Client` | Display name |
+| `polytraqqq` | `n2abclient` | Lowercase identifier |
 | `polyfly` | `n2ab` | Lowercase identifier |
 | `--ptq-` | `--n2ab-` | CSS custom property prefix |
 | `--pf-` | `--n2-` | Short CSS custom property prefix |
@@ -114,7 +114,7 @@ The `rebrandText()` function applies a deterministic ordered chain of string rep
 | `bg-pf-` | `bg-n2-` | Tailwind-style utility class |
 | `border-pf-` | `border-n2-` | Tailwind-style utility class |
 | `pf-` (word boundary) | `n2-` | Generic short class prefix |
-| `ptqShake` / `ptq[A-Z]…` | `n2abShake` / `n2ab[A-Z]…` | camelCase identifiers and `@keyframes` names |
+| `ptq[A-Z]…` | `n2ab[A-Z]…` | camelCase identifiers and `@keyframes` names (e.g. `ptqShake` → `n2abShake`) |
 | `ptq-` | `n2ab-` | Kebab-case identifier prefix |
 | `ptq` (word boundary) | `n2ab` | Bare word |
 
